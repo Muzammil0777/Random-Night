@@ -27,7 +27,7 @@ def _login(client, outbox, **body):
     assert client.post("/api/auth/request", json=body or ADULT).status_code == 202
     r = client.post("/api/auth/verify", json={"token": _token(outbox)})
     assert r.status_code == 200, r.text
-    return r.json()
+    return {"session": client.cookies.get(auth.COOKIE), "user": r.json()}
 
 
 # ---- age rules ----
@@ -103,6 +103,23 @@ def test_link_requests_are_rate_limited(client, outbox):
 
 
 # ---- sessions & profile ----
+def test_session_lives_only_in_an_httponly_cookie(client, outbox):
+    client.post("/api/auth/request", json=ADULT)
+    r = client.post("/api/auth/verify", json={"token": _token(outbox)})
+    cookie = r.headers["set-cookie"].lower()
+    assert "httponly" in cookie and "samesite=lax" in cookie and "path=/" in cookie
+    assert "session" not in r.json()                       # never handed to page JavaScript
+    assert client.get("/api/me").status_code == 200        # cookie alone is enough
+
+
+def test_logout_clears_the_cookie(client, outbox):
+    _login(client, outbox)
+    assert client.post("/api/auth/logout").status_code == 204
+    assert client.cookies.get(auth.COOKIE) is None
+    assert client.get("/api/me").status_code == 401
+
+
+
 def test_me_requires_valid_session(client, outbox, db):
     assert client.get("/api/me").status_code == 401
     assert client.get("/api/me", headers={"Authorization": "Bearer nope"}).status_code == 401

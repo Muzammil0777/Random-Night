@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
@@ -115,17 +115,23 @@ class MeUpdate(BaseModel):  # dob and email are deliberately not editable (age g
     emergency_contact: str | None = Field(default=None, max_length=120)
 
 
-class LoginResult(BaseModel):
-    session: str
-    user: Me
-
-
 # ---- dependency ----
-def current_user(db: DbDep, authorization: Annotated[str | None, Header()] = None) -> User:
+COOKIE = "rn_session"  # httpOnly: page JavaScript can never read it, so XSS can't steal sessions
+
+
+def _session_token(request: Request) -> str | None:
+    if token := request.cookies.get(COOKIE):
+        return token
+    authorization = request.headers.get("authorization", "")
+    return authorization[7:] if authorization.startswith("Bearer ") else None  # scripts/tests
+
+
+def current_user(db: DbDep, request: Request) -> User:
     unauthorized = HTTPException(status.HTTP_401_UNAUTHORIZED, "Not logged in", {"WWW-Authenticate": "Bearer"})
-    if not authorization or not authorization.startswith("Bearer "):
+    token = _session_token(request)
+    if not token:
         raise unauthorized
-    s = db.scalar(select(UserSession).where(UserSession.token_hash == _hash(authorization[7:])))
+    s = db.scalar(select(UserSession).where(UserSession.token_hash == _hash(token)))
     if s is None or _aware(s.expires_at) <= now():
         raise unauthorized
     return db.get(User, s.user_id)
@@ -161,7 +167,7 @@ def request_link(body: LinkRequest, db: DbDep) -> dict[str, bool]:
 
 
 @router.post("/auth/verify")
-def verify_link(body: VerifyRequest, db: DbDep) -> LoginResult:
+def verify_link(body: VerifyRequest, db: DbDep, response: Response) -> Me:
     h = _hash(body.token)
     # Atomic single-use: only one request can flip used_at from NULL.
     used = db.execute(update(LoginToken)
@@ -182,7 +188,10 @@ def verify_link(body: VerifyRequest, db: DbDep) -> LoginResult:
     session_token = secrets.token_urlsafe(32)
     db.add(UserSession(token_hash=_hash(session_token), user_id=user.id, expires_at=now() + SESSION_TTL))
     db.commit()
-    return LoginResult(session=session_token, user=Me.model_validate(user))
+    # The token goes only into the httpOnly cookie, never the body, so the frontend can't leak it to localStorage.
+    response.set_cookie(COOKIE, session_token, max_age=int(SESSION_TTL.total_seconds()), httponly=True,
+                        secure=os.environ.get("APP_URL", "").startswith("https://"), samesite="lax", path="/")
+    return Me.model_validate(user)
 
 
 @router.get("/me")
@@ -199,6 +208,7 @@ def update_me(body: MeUpdate, user: UserDep, db: DbDep) -> Me:
 
 
 @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
-def logout(db: DbDep, user: UserDep, authorization: Annotated[str, Header()]) -> None:
-    db.execute(delete(UserSession).where(UserSession.token_hash == _hash(authorization[7:])))
+def logout(db: DbDep, user: UserDep, request: Request, response: Response) -> None:
+    db.execute(delete(UserSession).where(UserSession.token_hash == _hash(_session_token(request))))
     db.commit()
+    response.delete_cookie(COOKIE, path="/")

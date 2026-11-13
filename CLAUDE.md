@@ -26,6 +26,16 @@ TEST_DATABASE_URL= .venv/Scripts/python -m pytest -q   # fast loop: in-memory SQ
 .venv/Scripts/python -m uvicorn app.main:app --reload
 ```
 
+Frontend (run from `frontend/`, with the backend on :8000; Vite proxies `/api`, so it's same-origin like Vercel):
+```bash
+npm install
+npm run dev     # http://localhost:5173
+npm run build
+```
+Click-through without touching Neon: start the backend with `DATABASE_URL=sqlite:///./dev.db` (seed it first). In dev the login link is printed in the backend log.
+
+- Sessions: httpOnly `rn_session` cookie (SameSite=Lax, Secure on https). The token is never in a response body; the frontend never stores auth in localStorage. The login token is read and stripped from the URL once at module load (StrictMode-safe).
+
 ## Rules that must never break (enforce in code and cover with tests)
 - Never route a user under 21 to a licensed venue.
 - Paid rank (`cpa_rate_inr`) only reorders venues that already pass the fit filter (area, budget, time, vibe, rating floor, active).
