@@ -95,13 +95,13 @@ Invoices are a query (`checkins × cpa_rate` per venue per month), not a table.
 | 2 | Auth (magic link) + profile + date-of-birth age calc + admin ID-verify flag | **Real tests:** login, token expiry, age calc at the 21st-birthday boundary |
 | 3 | `sqladmin` panel for venues, experiences and users | Manually add a venue in the admin |
 | 4 | **Generator** (pure function) | **Real tests:** an under-21 never gets a licensed venue; a paying venue outside the area or vibe is never chosen; a higher bid wins only between equal-fit venues; closing time and budget are respected; partner flag is set |
-| 5 | Plan UI: 4 inputs + company mode → timeline with "Partner venue" labels | Click through on a phone viewport |
+| 5 | Plan UI: 4 inputs + company mode → timeline with "Partner venue" labels. Login page: strip `?token=` from the URL immediately (`history.replaceState`), set `Referrer-Policy: no-referrer`, and decide session storage (prefer httpOnly cookie, same origin on Vercel) | Click through on a phone viewport |
 | 6 | Random Friday drop + group matching. A batch job buckets users by area, vibe, budget and age band into groups of 4–6, with optional women-only groups. | **Tests:** group sizes are 4–6; no under-21s in licensed-night groups; leftovers are handled |
 | 7 | Booking + check-in codes + venue staff page | **Tests:** a code works once, only at the right venue, only on that night |
 | 8 | Venue dashboard + monthly invoice CSV | **Tests:** invoice total = checked-in guests × rate; no-shows are not billed |
 | 9 | Ratings + report/block + auto-pause for venues below the rating floor | **Tests:** a venue under the floor is excluded from the next generation |
 | 10 | Safety: share plan with a contact, SOS button | Manual test on a phone |
-| 11 | Landing page + waitlist with referral bump; PWA manifest + install prompt; deploy to Vercel + Neon, with a weekly cron | Live HTTPS URL works; installs on Android and iPhone; cron run creates groups |
+| 11 | Landing page + waitlist with referral bump; PWA manifest + install prompt; deploy to Vercel + Neon, with a weekly cron; per-IP rate limit on `/api/auth/request` (Vercel firewall rule or app-level); set `RESEND_API_KEY`, `EMAIL_FROM`, `APP_URL` in Vercel | Live HTTPS URL works; installs on Android and iPhone; cron run creates groups |
 
 **Order matters.** Tasks 1 → 2 → 4 → 7 → 8 are the money path. Tasks 3, 5, 6, 9 and 10 build on that path.
 

@@ -5,7 +5,7 @@ from fastapi import Depends, FastAPI
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app import models  # noqa: F401  (registers tables on Base.metadata)
+from app import auth, models  # noqa: F401  (models registers tables on Base.metadata)
 from app.db import Base, engine, get_db
 
 DbDep = Annotated[Session, Depends(get_db)]
@@ -19,6 +19,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Random Night API", lifespan=lifespan)
+app.include_router(auth.router)
 
 
 @app.get("/api/health")

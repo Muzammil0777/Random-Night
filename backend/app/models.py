@@ -30,6 +30,27 @@ class User(Base):
     created_at: Mapped[datetime] = created_at()
 
 
+class LoginToken(Base):
+    """Single-use magic link. Only the SHA-256 of the token is stored."""
+    __tablename__ = "login_tokens"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token_hash: Mapped[str] = mapped_column(unique=True)
+    email: Mapped[str] = mapped_column(index=True)
+    name: Mapped[str | None]  # signup details, used only if the email has no account yet
+    dob: Mapped[date | None]
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class UserSession(Base):
+    """Revocable login session (bearer token, stored hashed)."""
+    __tablename__ = "sessions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token_hash: Mapped[str] = mapped_column(unique=True)
+    user_id: Mapped[int] = fk("users.id")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class Venue(Base):
     __tablename__ = "venues"
     __table_args__ = (
