@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 // ---- api ----
 export async function api(path, { method = "GET", body } = {}) {
@@ -78,7 +78,7 @@ export default function App() {
       </header>
       <main>
         {me === undefined && <p className="muted" aria-live="polite">Loading…</p>}
-        {me === null && <Login initialError={bootError} />}
+        {me === null && <Login initialError={bootError} onLoggedIn={setMe} />}
         {me && <Planner me={me} onMe={setMe} />}
       </main>
     </div>
@@ -86,12 +86,72 @@ export default function App() {
 }
 
 // ---- login / signup ----
-function Login({ initialError }) {
+const GOOGLE_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID; // public; no button when unset
+const maxDob = () => isoDate(new Date(new Date().setFullYear(new Date().getFullYear() - 18)));
+
+function loadGoogle() {
+  if (window.google?.accounts?.id) return Promise.resolve(window.google);
+  return new Promise((resolve, reject) => {
+    const script = Object.assign(document.createElement("script"),
+      { src: "https://accounts.google.com/gsi/client", async: true, onerror: reject });
+    script.onload = () => resolve(window.google);
+    document.head.appendChild(script);
+  });
+}
+
+// "Continue with Google". New accounts add a date of birth once: Google doesn't share it.
+function GoogleSignIn({ onLoggedIn }) {
+  const buttonRef = useRef(null);
+  const [pending, setPending] = useState(null); // Google credential waiting for a date of birth
+  const [error, setError] = useState(null);
+
+  async function send(credential, dob) {
+    setError(null);
+    try {
+      onLoggedIn(await api("/auth/google", { method: "POST", body: dob ? { credential, dob } : { credential } }));
+    } catch (err) {
+      if (err.status === 428) setPending(credential);
+      else setError(err.message);
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    loadGoogle().then((google) => {
+      if (cancelled || !buttonRef.current) return;
+      google.accounts.id.initialize({ client_id: GOOGLE_ID, callback: (r) => send(r.credential) });
+      google.accounts.id.renderButton(buttonRef.current,
+        { theme: "filled_black", size: "large", shape: "pill", text: "continue_with", width: 300 });
+    }).catch(() => !cancelled && setError("Couldn't load Google sign-in. Use the email link below."));
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- set up the button once
+
+  if (pending) {
+    return (
+      <form className="card" onSubmit={(e) => { e.preventDefault(); send(pending, new FormData(e.currentTarget).get("dob")); }}>
+        <h2>One last thing</h2>
+        <label htmlFor="g-dob">Date of birth <span className="muted">(18+ only)</span></label>
+        <input id="g-dob" name="dob" type="date" max={maxDob()} required />
+        <p className="muted small">We need it for the age rules. Bars and clubs also check your ID at the door.</p>
+        {error && <p className="error" role="alert">{error}</p>}
+        <button type="submit" className="cta">Finish signing up</button>
+      </form>
+    );
+  }
+  return (
+    <div className="google">
+      <div ref={buttonRef} />
+      {error && <p className="error" role="alert">{error}</p>}
+    </div>
+  );
+}
+
+function Login({ initialError, onLoggedIn }) {
   const [isNew, setIsNew] = useState(false);
   const [sentTo, setSentTo] = useState(null);
   const [error, setError] = useState(initialError);
   const [busy, setBusy] = useState(false);
-  const eighteenYearsAgo = isoDate(new Date(new Date().setFullYear(new Date().getFullYear() - 18)));
+  const eighteenYearsAgo = maxDob();
 
   async function submit(e) {
     e.preventDefault();
@@ -121,6 +181,12 @@ function Login({ initialError }) {
   return (
     <section>
       <h1 className="hero">You choose the vibe.<br />We create the night.</h1>
+      {GOOGLE_ID && (
+        <>
+          <GoogleSignIn onLoggedIn={onLoggedIn} />
+          <p className="or muted small">or get a login link by email</p>
+        </>
+      )}
       <form className="card" onSubmit={submit}>
         <label htmlFor="email">Email</label>
         <input id="email" name="email" type="email" autoComplete="email" required />

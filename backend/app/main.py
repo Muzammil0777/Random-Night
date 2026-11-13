@@ -26,7 +26,7 @@ def check_production_env(env=os.environ) -> None:
     for name, minimum in (("SECRET_KEY", 32), ("ADMIN_PASSWORD", 12), ("CRON_SECRET", 16)):
         if len(env.get(name, "")) < minimum:
             problems.append(f"{name} needs {minimum}+ characters")
-    for name in ("RESEND_API_KEY", "EMAIL_FROM"):
+    for name in ("RESEND_API_KEY", "EMAIL_FROM", "GOOGLE_CLIENT_ID"):
         if not env.get(name):
             problems.append(f"{name} is missing")
     if problems:

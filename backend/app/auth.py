@@ -8,9 +8,13 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
 
 import httpx
+from google.auth.exceptions import GoogleAuthError
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import ratelimit
@@ -91,6 +95,11 @@ class LinkRequest(BaseModel):
     email: EmailStr
     name: str | None = Field(default=None, min_length=1, max_length=80)
     dob: date | None = Field(default=None, ge=date(1900, 1, 1))
+
+
+class GoogleLogin(BaseModel):
+    credential: str = Field(min_length=20, max_length=4096)  # Google's ID token (a signed JWT)
+    dob: date | None = Field(default=None, ge=date(1900, 1, 1))  # only on a first sign-in
 
 
 class VerifyRequest(BaseModel):
@@ -211,6 +220,10 @@ def verify_link(body: VerifyRequest, db: DbDep, response: Response) -> Me:
         user = User(email=lt.email, name=lt.name, dob=lt.dob)
         db.add(user)
         db.flush()
+    return _start_session(db, user, response)
+
+
+def _start_session(db: Session, user: User, response: Response) -> Me:
     session_token = secrets.token_urlsafe(32)
     db.add(UserSession(token_hash=_hash(session_token), user_id=user.id, expires_at=now() + SESSION_TTL))
     db.commit()
@@ -218,6 +231,52 @@ def verify_link(body: VerifyRequest, db: DbDep, response: Response) -> Me:
     response.set_cookie(COOKIE, session_token, max_age=int(SESSION_TTL.total_seconds()), httponly=True,
                         secure=os.environ.get("APP_URL", "").startswith("https://"), samesite="lax", path="/")
     return Me.model_validate(user)
+
+
+def verify_google(credential: str) -> dict:
+    """Google's own checks: signature, audience = our client id, issuer, expiry. Raises ValueError if any fail."""
+    client_id = os.environ.get("GOOGLE_CLIENT_ID")
+    if not client_id:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Google sign-in is not set up")
+    return id_token.verify_oauth2_token(credential, google_requests.Request(), client_id)
+
+
+@router.post("/auth/google")
+def google_login(body: GoogleLogin, db: DbDep, request: Request, response: Response) -> Me:
+    """Sign in (or up) with Google. Same account as the email link when the email matches."""
+    if ip := ratelimit.client_ip(request):
+        ratelimit.limit(db, f"auth-google-ip:{ip}", MAX_LINKS_PER_IP, LOGIN_TTL)
+    try:
+        claims = verify_google(body.credential)
+    except ValueError:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Google sign-in didn't work. Please try again.")
+    except GoogleAuthError:  # e.g. Google's keys couldn't be fetched
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Google sign-in is unavailable. Use the email link.")
+    if not claims.get("email_verified") or not claims.get("email") or not claims.get("sub"):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Your Google account's email isn't verified.")
+    email, sub = claims["email"].lower(), str(claims["sub"])
+    user = db.scalar(select(User).where(User.email == email))
+    if user is not None and user.google_sub not in (None, sub):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "This email belongs to a different Google account. "
+                            "Use the email link instead.")
+    if user is None:
+        # Google doesn't share date of birth; the age rules need it, so a new user adds it once.
+        if body.dob is None:
+            raise HTTPException(status.HTTP_428_PRECONDITION_REQUIRED, "Add your date of birth to finish signing up.")
+        if age_on(body.dob, today_ist()) < MIN_AGE:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Random Night is 18+")
+        name = (claims.get("given_name") or claims.get("name") or email.split("@")[0]).strip()[:80] or "Guest"
+        user = User(email=email, name=name, dob=body.dob, google_sub=sub)
+        db.add(user)
+        try:
+            db.flush()
+        except IntegrityError:  # a double tap created the account a moment ago: log into that one
+            db.rollback()
+            user = db.scalar(select(User).where(User.email == email, User.google_sub == sub))
+            if user is None:
+                raise HTTPException(status.HTTP_409_CONFLICT, "Please try signing in again.")
+    user.google_sub = sub
+    return _start_session(db, user, response)
 
 
 @router.get("/me")

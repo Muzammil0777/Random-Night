@@ -27,6 +27,9 @@ class User(Base):
     id_verified: Mapped[bool] = mapped_column(default=False)
     gender: Mapped[str | None]
     emergency_contact: Mapped[str | None]
+    # Google's stable account id, saved at the first Google sign-in: if the email later moves to another
+    # Google account (reassigned work address), that account can't get in.
+    google_sub: Mapped[str | None] = mapped_column(unique=True)
     created_at: Mapped[datetime] = created_at()
 
 

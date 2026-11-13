@@ -55,7 +55,8 @@ def test_migrations_build_the_models_schema_postgres(pg_engine, monkeypatch):
 # ---- production config ----
 GOOD = {"VERCEL": "1", "APP_URL": "https://randomnight.in", "DATABASE_URL": "postgresql://x/y",
         "SECRET_KEY": "s" * 32, "ADMIN_PASSWORD": "a" * 12, "CRON_SECRET": "c" * 16,
-        "RESEND_API_KEY": "re_test", "EMAIL_FROM": "Random Night <hi@randomnight.in>"}
+        "RESEND_API_KEY": "re_test", "EMAIL_FROM": "Random Night <hi@randomnight.in>",
+        "GOOGLE_CLIENT_ID": "123.apps.googleusercontent.com"}
 
 
 def test_production_boots_with_complete_config():
@@ -67,6 +68,7 @@ def test_production_boots_with_complete_config():
     ({"ADMIN_PASSWORD": ""}, "ADMIN_PASSWORD"),
     ({"CRON_SECRET": "x"}, "CRON_SECRET"),
     ({"RESEND_API_KEY": ""}, "RESEND_API_KEY"),
+    ({"GOOGLE_CLIENT_ID": ""}, "GOOGLE_CLIENT_ID"),
     ({"DATABASE_URL": "sqlite:///x.db"}, "DATABASE_URL"),
     ({"APP_URL": "http://localhost:5173"}, "APP_URL"),
 ])

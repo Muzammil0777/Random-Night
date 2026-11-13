@@ -71,3 +71,5 @@ textarea { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #2
 .safety-card h2 { margin: 0; }
 .cta.sos { background: #ff3b5c; color: #fff; }
 .sos-panel, .contact { display: grid; gap: 8px; }
+.google { display: grid; justify-items: center; gap: 8px; min-height: 44px; margin-bottom: 8px; }
+.or { text-align: center; margin: 8px 0; }

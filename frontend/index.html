@@ -3,8 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <!-- Login links carry a one-time token in the URL: never leak it via Referer. -->
-    <meta name="referrer" content="no-referrer" />
+    <!-- Login links carry a one-time token in the URL: other sites only ever get our origin, never the path or
+         query (and the token is stripped at load anyway). Sign in with Google needs at least this policy. -->
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
     <meta name="theme-color" content="#0a0c18" />
     <title>Random Night</title>
   </head>
