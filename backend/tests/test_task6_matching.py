@@ -9,7 +9,7 @@ from sqlalchemy import select
 from app import auth
 from app.drops import upcoming_friday
 from app.matching import group_sizes, match
-from app.models import DropEntry, GroupMember, Night, Plan, PlanStop, User, UserSession
+from app.models import DropEntry, GroupMember, Night, Plan, PlanStop, Ticket, User, UserSession
 from app.seed import load
 
 
@@ -82,7 +82,10 @@ def test_thirteen_people_form_three_groups_with_one_shared_night(seeded):
     for gid in groups:
         plan = seeded.scalar(select(Plan).where(Plan.group_id == gid))
         stops = seeded.scalars(select(PlanStop).where(PlanStop.plan_id == plan.id)).all()
-        assert len(stops) >= 2 and all(len(s.code) == 6 for s in stops)
+        assert len(stops) >= 2
+        tickets = seeded.scalars(select(Ticket).where(Ticket.plan_stop_id.in_([s.id for s in stops]))).all()
+        assert len(tickets) == len(stops) * len(groups[gid])  # every member gets a code for every stop
+        assert all(len(t.code) == 6 and t.code.isdigit() and t.night_date == FRI for t in tickets)
 
 
 def test_no_under_21_in_a_licensed_night_group(seeded):

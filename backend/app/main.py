@@ -5,7 +5,7 @@ from fastapi import Depends, FastAPI
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app import auth, drops, models, nights  # noqa: F401  (models registers tables on Base.metadata)
+from app import auth, bookings, drops, models, nights, staff  # noqa: F401  (models registers tables on Base.metadata)
 from app.admin import mount_admin
 from app.db import Base, engine, get_db
 
@@ -23,6 +23,8 @@ app = FastAPI(title="Random Night API", lifespan=lifespan)
 app.include_router(auth.router)
 app.include_router(nights.router)
 app.include_router(drops.router)
+app.include_router(bookings.router)
+app.include_router(staff.router)
 mount_admin(app)
 
 

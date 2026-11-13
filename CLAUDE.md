@@ -24,6 +24,7 @@ TEST_DATABASE_URL= .venv/Scripts/python -m pytest -q   # fast loop: in-memory SQ
 .venv/Scripts/python -m pytest -q                      # real Postgres: Neon "test" branch (~8 min, before commits). NEVER run two at once: each test drops all tables
 .venv/Scripts/python -m app.seed                       # seeds the branch in DATABASE_URL (Neon production)
 .venv/Scripts/python -m uvicorn app.main:app --reload
+.venv/Scripts/python -m app.staff "Venue name" "Front door"  # door-staff key for /venue, shown once; revoke in /admin
 ```
 
 Frontend (run from `frontend/`, with the backend on :8000; Vite proxies `/api`, so it's same-origin like Vercel):

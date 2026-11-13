@@ -46,5 +46,10 @@ fieldset.choice { border: 0; padding: 0; margin: 4px 0 0; }
 .badge { display: inline-block; font-size: 0.75rem; font-weight: 700; padding: 3px 8px; border-radius: 6px;
   background: var(--pink); color: #0a0c18; }
 .total { font-weight: 700; }
+.code { margin-top: 8px !important; color: var(--lime); }
+.code strong { display: block; white-space: nowrap; font-size: 1.4rem; letter-spacing: 0.12em; font-variant-numeric: tabular-nums; }
+.cta + .cta { margin-top: 8px; }
 .check { display: flex; gap: 10px; align-items: center; min-height: 44px; font-weight: 400; }
 .check input { width: 22px; height: 22px; }
+.code-input { font-size: 2rem; letter-spacing: 0.3em; text-align: center; font-variant-numeric: tabular-nums; }
+.ok { color: var(--lime); font-weight: 700; margin: 0; }

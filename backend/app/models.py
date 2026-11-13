@@ -173,7 +173,33 @@ class PlanStop(Base):
     experience: Mapped[Experience] = relationship()
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     is_partner: Mapped[bool]  # snapshot at generation time, drives the "Partner" label
-    code: Mapped[str] = mapped_column(index=True)  # check-in code, rules added in task 7
+    # Unused since task 7 (codes are per guest, in tickets); kept because create_all can't drop columns.
+    code: Mapped[str] = mapped_column(index=True, default="")
+
+
+class Ticket(Base):
+    """One guest's pass for one stop (task 7). Staff enter `code` at the door; it only works at that
+    stop's venue on that night, and CheckIn's unique key makes it work once."""
+    __tablename__ = "tickets"
+    __table_args__ = (UniqueConstraint("plan_stop_id", "user_id"), UniqueConstraint("night_date", "code"))
+    id: Mapped[int] = mapped_column(primary_key=True)
+    plan_stop_id: Mapped[int] = fk("plan_stops.id")
+    plan_stop: Mapped[PlanStop] = relationship()
+    user_id: Mapped[int] = fk("users.id")
+    night_date: Mapped[date] = mapped_column(index=True)
+    code: Mapped[str]
+
+
+class VenueKey(Base):
+    """Login key for a venue's door staff (task 7). Only the SHA-256 is stored; check-ins record the label."""
+    __tablename__ = "venue_keys"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    venue_id: Mapped[int] = fk("venues.id")
+    venue: Mapped[Venue] = relationship()
+    key_hash: Mapped[str] = mapped_column(unique=True)
+    label: Mapped[str]
+    active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = created_at()
 
 
 class CheckIn(Base):

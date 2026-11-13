@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 // ---- api ----
-async function api(path, { method = "GET", body } = {}) {
+export async function api(path, { method = "GET", body } = {}) {
   const res = await fetch(`/api${path}`, {
     method,
     credentials: "same-origin", // session lives in an httpOnly cookie; JS never sees it
@@ -165,6 +165,7 @@ function Planner({ me }) {
   const [opts, setOpts] = useState(null);
   const [inputs, setInputs] = useState({ date: nextFriday(), area: "", budget_inr: 2000, hours: 4, vibe: "party", company: "solo" });
   const [night, setNight] = useState(null);
+  const [booked, setBooked] = useState(null);
   const [drop, setDrop] = useState(null);
   const [womenOnly, setWomenOnly] = useState(false);
   const [error, setError] = useState(null);
@@ -178,8 +179,32 @@ function Planner({ me }) {
       setOpts(o);
       setInputs((prev) => ({ ...prev, area: prev.area || o.areas[0] }));
     }).catch((e) => !ignore && setError(e.message));
+    api("/plans/next").then((b) => !ignore && setBooked(b)).catch(() => {});
     return () => { ignore = true; };
   }, []);
+
+  async function book() {
+    setBusy(true);
+    setError(null);
+    try {
+      setBooked(await api("/plans", { method: "POST", body: inputs }));
+      setNight(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancel() {
+    setError(null);
+    try {
+      await api(`/plans/${booked.id}`, { method: "DELETE" });
+      setBooked(null);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
 
   async function generate(e) {
     e.preventDefault();
@@ -202,7 +227,8 @@ function Planner({ me }) {
     try {
       return await api("/drops", { method: "POST", body: { date, area, vibe, budget_inr, women_only: womenOnly } });
     } catch (err) {
-      if (err.status === 409) return api(`/drops/${date}`); // already joined: show where it stands
+      // Already joined: show where it stands. (409 can also mean a night is booked that date.)
+      if (err.status === 409) return api(`/drops/${date}`).catch(() => { throw err; });
       throw err;
     }
   }
@@ -219,7 +245,24 @@ function Planner({ me }) {
 
   const joining = inputs.company === "new_people";
   if (drop) return <Drop drop={drop} maxBudget={opts.budgets.at(-1)} onBack={() => setDrop(null)} onLeave={leaveDrop} />;
-  if (night) return <Night night={night} inputs={inputs} maxBudget={opts.budgets.at(-1)} onBack={() => setNight(null)} />;
+  if (booked && opts) {
+    return (
+      <Night night={booked} inputs={booked.inputs} maxBudget={opts.budgets.at(-1)} title="You're booked.">
+        {error && <p className="error" role="alert">{error}</p>}
+        {!booked.group && <button type="button" className="cta ghost" onClick={cancel}>Cancel this night</button>}
+        <button type="button" className="link" onClick={() => setBooked(null)}>Plan another night</button>
+      </Night>
+    );
+  }
+  if (night) {
+    return (
+      <Night night={night} inputs={inputs} maxBudget={opts.budgets.at(-1)}>
+        {error && <p className="error" role="alert">{error}</p>}
+        <button type="button" className="cta" onClick={book} disabled={busy}>{busy ? "Booking…" : "Book this night"}</button>
+        <button type="button" className="cta ghost" onClick={() => { setNight(null); setError(null); }}>Change my night</button>
+      </Night>
+    );
+  }
   if (!opts) return error ? <p className="error" role="alert">{error}</p> : <p className="muted">Loading…</p>;
 
   const today = isoDate(new Date());
@@ -278,7 +321,9 @@ function Drop({ drop, maxBudget, onBack, onLeave }) {
     return (
       <>
         <p className="note">Your group: <strong>{drop.group.join(", ")}</strong>. Meet them at the first stop.</p>
-        <Night night={drop.night} inputs={picks} maxBudget={maxBudget} onBack={onBack} />
+        <Night night={drop.night} inputs={picks} maxBudget={maxBudget} title="Your group's night.">
+          <button type="button" className="cta ghost" onClick={onBack}>Back</button>
+        </Night>
       </>
     );
   }
@@ -298,13 +343,13 @@ function Drop({ drop, maxBudget, onBack, onLeave }) {
   );
 }
 
-function Night({ night, inputs, maxBudget, onBack }) {
+function Night({ night, inputs, maxBudget, title = "Your night, curated.", children }) {
   const anyPartner = night.stops.some((s) => s.is_partner);
   const meta = [fmtDay(inputs.date), inputs.area, budgetLabel(inputs.budget_inr, maxBudget),
                 hoursLabel(inputs.hours), LABELS[inputs.vibe]];
   return (
     <section>
-      <h1>Your night, curated.</h1>
+      <h1>{title}</h1>
       <p className="meta">{meta.join(" · ")}</p>
       <ol className="timeline">
         {night.stops.map((s) => (
@@ -314,6 +359,11 @@ function Night({ night, inputs, maxBudget, onBack }) {
               <h2>{s.title}</h2>
               <p className="muted">{s.venue} · {s.area} · {rupees(s.price_per_head_inr)}</p>
               {s.is_partner && <span className="badge">Partner venue</span>}
+              {s.code && (
+                <p className="code">
+                  {s.checked_in ? "Checked in ✓" : <>Show staff this code: <strong>{s.code.slice(0, 3)} {s.code.slice(3)}</strong></>}
+                </p>
+              )}
             </div>
           </li>
         ))}
@@ -327,7 +377,10 @@ function Night({ night, inputs, maxBudget, onBack }) {
       )}
       {!night.bars_unlocked && <p className="note">No bars or clubs tonight: those need 21+ and an ID check.</p>}
       <p className="muted small">Area, budget and duration are known upfront. The surprise is the experience, not your safety.</p>
-      <button type="button" className="cta ghost" onClick={onBack}>Change my night</button>
+      {night.stops[0]?.code && (
+        <p className="muted small">Each code works once, only at that venue, only that night. Don't share it.</p>
+      )}
+      {children}
     </section>
   );
 }

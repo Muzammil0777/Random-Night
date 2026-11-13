@@ -8,13 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from app.auth import IST, UserDep, now, today_ist
 from app.db import get_db
 from app.matching import is_woman, match
-from app.models import DropEntry, Experience, GroupMember, Plan, PlanStop, User
-from app.nights import MAX_DAYS_AHEAD, Area, PlanOut, stop_out
+from app.models import DropEntry, Plan, User
+from app.bookings import BookedNight, booked_night, has_night
+from app.nights import MAX_DAYS_AHEAD, Area
 
 router = APIRouter(prefix="/api", tags=["drops"])
 DbDep = Annotated[Session, Depends(get_db)]
@@ -52,22 +53,15 @@ class DropStatus(BaseModel):
     budget_inr: int
     status: Literal["waiting", "matched", "unmatched"]
     group: list[str] | None = None   # first names only
-    night: PlanOut | None = None
+    night: BookedNight | None = None  # includes this member's check-in codes
 
 
-def _status(db: Session, entry: DropEntry) -> DropStatus:
+def _status(db: Session, entry: DropEntry, user: User) -> DropStatus:
     picks = {"date": entry.date, "area": entry.area, "vibe": entry.vibe, "budget_inr": entry.budget_inr}
     if entry.group_id is None:
         return DropStatus(**picks, status="unmatched" if entry.tried_at else "waiting")
-    names = db.scalars(select(User.name).join(GroupMember, GroupMember.user_id == User.id)
-                       .where(GroupMember.group_id == entry.group_id).order_by(User.id)).all()
-    plan = db.scalar(select(Plan).where(Plan.group_id == entry.group_id))
-    stops = [stop_out(s.experience, s.starts_at, s.is_partner) for s in db.scalars(
-        select(PlanStop).where(PlanStop.plan_id == plan.id).order_by(PlanStop.starts_at)
-        .options(joinedload(PlanStop.experience).joinedload(Experience.venue)))]
-    return DropStatus(**picks, status="matched", group=[n.split()[0] for n in names],
-                      night=PlanOut(stops=stops, total_inr=sum(s.price_per_head_inr for s in stops),
-                                    bars_unlocked=plan.inputs["licensed_ok"]))
+    night = booked_night(db, db.scalar(select(Plan).where(Plan.group_id == entry.group_id)), user)
+    return DropStatus(**picks, status="matched", group=night.group, night=night)
 
 
 def _entry(db: Session, user: User, night_date: date) -> DropEntry:
@@ -79,6 +73,8 @@ def _entry(db: Session, user: User, night_date: date) -> DropEntry:
 
 @router.post("/drops", status_code=status.HTTP_201_CREATED)
 def join_drop(body: DropJoin, user: UserDep, db: DbDep) -> DropStatus:
+    if has_night(db, user, body.date):
+        raise HTTPException(status.HTTP_409_CONFLICT, "You already have a night booked for that date.")
     if body.women_only and not is_woman(user):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Women-only groups are for women.")
     entry = DropEntry(user_id=user.id, **body.model_dump())
@@ -88,12 +84,12 @@ def join_drop(body: DropJoin, user: UserDep, db: DbDep) -> DropStatus:
     except IntegrityError:
         db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "You've already joined that Friday.")
-    return _status(db, entry)
+    return _status(db, entry, user)
 
 
 @router.get("/drops/{night_date}")
 def my_drop(night_date: date, user: UserDep, db: DbDep) -> DropStatus:
-    return _status(db, _entry(db, user, night_date))
+    return _status(db, _entry(db, user, night_date), user)
 
 
 @router.delete("/drops/{night_date}", status_code=status.HTTP_204_NO_CONTENT)

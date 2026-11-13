@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.auth import IST, UserDep, age_on, can_enter_licensed, today_ist
 from app.db import get_db
-from app.generator import AREAS, NightRequest, generate
-from app.models import VIBES, Experience, Venue
+from app.generator import AREAS, NightRequest, Stop, generate
+from app.models import VIBES, Experience, User, Venue
 
 router = APIRouter(prefix="/api", tags=["nights"])
 DbDep = Annotated[Session, Depends(get_db)]
@@ -84,8 +84,8 @@ def options() -> Options:
     return Options(areas=AREAS, budgets=list(BUDGETS), hours=list(HOURS), vibes=list(VIBES), company=list(COMPANY))
 
 
-@router.post("/plans/preview")
-def preview_plan(body: PlanInputs, user: UserDep, db: DbDep) -> PlanOut:
+def build_night(db: Session, user: User, body: PlanInputs) -> tuple[list[Stop], bool]:
+    """The night the generator picks for this user, or 404. Booking reuses it so it never trusts client stops."""
     licensed_ok = can_enter_licensed(user, body.date)
     experiences = db.scalars(select(Experience).join(Venue).where(Venue.active)
                              .options(joinedload(Experience.venue))).all()
@@ -96,5 +96,11 @@ def preview_plan(body: PlanInputs, user: UserDep, db: DbDep) -> PlanOut:
     if plan is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND,
                             "No night fits that yet. Try a bigger budget, more time, or another vibe.")
+    return plan, licensed_ok
+
+
+@router.post("/plans/preview")
+def preview_plan(body: PlanInputs, user: UserDep, db: DbDep) -> PlanOut:
+    plan, licensed_ok = build_night(db, user, body)
     stops = [stop_out(s.experience, s.starts_at, s.is_partner) for s in plan]
     return PlanOut(stops=stops, total_inr=sum(s.price_per_head_inr for s in stops), bars_unlocked=licensed_ok)
