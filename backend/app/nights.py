@@ -3,7 +3,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AfterValidator, BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
@@ -22,6 +22,15 @@ COMPANY = ("solo", "friends", "new_people")
 MAX_DAYS_AHEAD = 30
 
 
+def _known_area(v: str) -> str:
+    if v not in AREAS:
+        raise ValueError(f"area must be one of {', '.join(AREAS)}")
+    return v
+
+
+Area = Annotated[str, AfterValidator(_known_area)]
+
+
 class Options(BaseModel):
     areas: list[str]
     budgets: list[int]
@@ -31,19 +40,12 @@ class Options(BaseModel):
 
 
 class PlanInputs(BaseModel):
-    area: str
+    area: Area
     budget_inr: int = Field(ge=500, le=50_000)
     hours: Literal[2, 4] | None            # None = all night
     vibe: Literal["party", "food", "chill", "surprise"]
     company: Literal["solo", "friends", "new_people"]  # matching uses it from task 6
     date: date
-
-    @field_validator("area")
-    @classmethod
-    def known_area(cls, v: str) -> str:
-        if v not in AREAS:
-            raise ValueError(f"area must be one of {', '.join(AREAS)}")
-        return v
 
     @field_validator("date")
     @classmethod
@@ -71,6 +73,12 @@ class PlanOut(BaseModel):
     bars_unlocked: bool     # False -> UI explains bars/clubs need 21+ and an ID check
 
 
+def stop_out(exp: Experience, starts_at: datetime, is_partner: bool) -> StopOut:
+    return StopOut(title=exp.title, kind=exp.kind, venue=exp.venue.name, area=exp.venue.area, starts_at=starts_at,
+                   ends_at=starts_at + timedelta(minutes=exp.duration_min),
+                   price_per_head_inr=exp.price_per_head_inr, is_partner=is_partner)
+
+
 @router.get("/options")
 def options() -> Options:
     return Options(areas=AREAS, budgets=list(BUDGETS), hours=list(HOURS), vibes=list(VIBES), company=list(COMPANY))
@@ -88,7 +96,5 @@ def preview_plan(body: PlanInputs, user: UserDep, db: DbDep) -> PlanOut:
     if plan is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND,
                             "No night fits that yet. Try a bigger budget, more time, or another vibe.")
-    stops = [StopOut(title=s.experience.title, kind=s.experience.kind, venue=s.experience.venue.name,
-                     area=s.experience.venue.area, starts_at=s.starts_at, ends_at=s.ends_at,
-                     price_per_head_inr=s.experience.price_per_head_inr, is_partner=s.is_partner) for s in plan]
+    stops = [stop_out(s.experience, s.starts_at, s.is_partner) for s in plan]
     return PlanOut(stops=stops, total_inr=sum(s.price_per_head_inr for s in stops), bars_unlocked=licensed_ok)

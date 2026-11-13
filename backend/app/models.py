@@ -136,6 +136,23 @@ class GroupMember(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True, index=True)
 
 
+class DropEntry(Base):
+    """A sign-up for one Random Friday (task 6). The Thursday job sets group_id when it matches the user."""
+    __tablename__ = "drop_entries"
+    __table_args__ = (UniqueConstraint("user_id", "date"), CheckConstraint(f"vibe IN {VIBES}", name="vibe_valid"))
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = fk("users.id")
+    user: Mapped[User] = relationship()
+    date: Mapped[date]
+    area: Mapped[str]
+    vibe: Mapped[str]
+    budget_inr: Mapped[int]
+    women_only: Mapped[bool] = mapped_column(default=False)
+    group_id: Mapped[int | None] = fk("groups.id", nullable=True)
+    tried_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # last matching run that saw it
+    created_at: Mapped[datetime] = created_at()
+
+
 class Plan(Base):
     __tablename__ = "plans"
     # A plan belongs to exactly one owner: a solo user or a matched group.
@@ -153,6 +170,7 @@ class PlanStop(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     plan_id: Mapped[int] = fk("plans.id")
     experience_id: Mapped[int] = fk("experiences.id")
+    experience: Mapped[Experience] = relationship()
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     is_partner: Mapped[bool]  # snapshot at generation time, drives the "Partner" label
     code: Mapped[str] = mapped_column(index=True)  # check-in code, rules added in task 7

@@ -46,3 +46,5 @@ fieldset.choice { border: 0; padding: 0; margin: 4px 0 0; }
 .badge { display: inline-block; font-size: 0.75rem; font-weight: 700; padding: 3px 8px; border-radius: 6px;
   background: var(--pink); color: #0a0c18; }
 .total { font-weight: 700; }
+.check { display: flex; gap: 10px; align-items: center; min-height: 44px; font-weight: 400; }
+.check input { width: 22px; height: 22px; }

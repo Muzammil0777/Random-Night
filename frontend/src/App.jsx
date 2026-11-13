@@ -39,9 +39,10 @@ const LABELS = { solo: "Just me", friends: "With friends", new_people: "Meet new
 function isoDate(d) {
   return d.toLocaleDateString("en-CA", { timeZone: TZ }); // YYYY-MM-DD in IST
 }
-function nextFriday() {
+// strict: never today (Random Friday closes the Thursday before).
+function nextFriday(strict = false) {
   const d = new Date();
-  d.setDate(d.getDate() + ((5 - d.getDay() + 7) % 7));
+  d.setDate(d.getDate() + ((5 - d.getDay() + 7) % 7 || (strict ? 7 : 0)));
   return isoDate(d);
 }
 
@@ -164,6 +165,8 @@ function Planner({ me }) {
   const [opts, setOpts] = useState(null);
   const [inputs, setInputs] = useState({ date: nextFriday(), area: "", budget_inr: 2000, hours: 4, vibe: "party", company: "solo" });
   const [night, setNight] = useState(null);
+  const [drop, setDrop] = useState(null);
+  const [womenOnly, setWomenOnly] = useState(false);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const set = (key) => (value) => setInputs((prev) => ({ ...prev, [key]: value }));
@@ -183,7 +186,8 @@ function Planner({ me }) {
     setBusy(true);
     setError(null);
     try {
-      setNight(await api("/plans/preview", { method: "POST", body: inputs }));
+      if (joining) setDrop(await joinDrop());
+      else setNight(await api("/plans/preview", { method: "POST", body: inputs }));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -191,6 +195,30 @@ function Planner({ me }) {
     }
   }
 
+  async function joinDrop() {
+    const { date, area, vibe, budget_inr } = inputs;
+    // Ticking "I'm a woman" is the self-declaration women-only groups rely on.
+    if (womenOnly && !me.gender) await api("/me", { method: "PATCH", body: { gender: "woman" } });
+    try {
+      return await api("/drops", { method: "POST", body: { date, area, vibe, budget_inr, women_only: womenOnly } });
+    } catch (err) {
+      if (err.status === 409) return api(`/drops/${date}`); // already joined: show where it stands
+      throw err;
+    }
+  }
+
+  async function leaveDrop() {
+    try {
+      await api(`/drops/${drop.date}`, { method: "DELETE" });
+      setDrop(null);
+    } catch (err) {
+      setError(err.message);
+      setDrop(null);
+    }
+  }
+
+  const joining = inputs.company === "new_people";
+  if (drop) return <Drop drop={drop} maxBudget={opts.budgets.at(-1)} onBack={() => setDrop(null)} onLeave={leaveDrop} />;
   if (night) return <Night night={night} inputs={inputs} maxBudget={opts.budgets.at(-1)} onBack={() => setNight(null)} />;
   if (!opts) return error ? <p className="error" role="alert">{error}</p> : <p className="muted">Loading…</p>;
 
@@ -209,12 +237,29 @@ function Planner({ me }) {
         </select>
         <Choice legend="Budget per person" name="budget" options={opts.budgets} value={inputs.budget_inr}
                 onChange={set("budget_inr")} label={(b) => budgetLabel(b, opts.budgets.at(-1))} />
-        <Choice legend="How long" name="hours" options={opts.hours} value={inputs.hours}
-                onChange={set("hours")} label={hoursLabel} />
+        {!joining && (
+          <Choice legend="How long" name="hours" options={opts.hours} value={inputs.hours}
+                  onChange={set("hours")} label={hoursLabel} />
+        )}
         <Choice legend="Vibe" name="vibe" options={opts.vibes} value={inputs.vibe} onChange={set("vibe")} />
         <Choice legend="Who's coming" name="company" options={opts.company} value={inputs.company}
-                onChange={set("company")} />
+                onChange={(c) => {
+                  set("company")(c);
+                  if (c === "new_people" && inputs.date <= today) set("date")(nextFriday(true));
+                }} />
+        {joining && (
+          <label className="check">
+            <input type="checkbox" checked={womenOnly} onChange={(e) => setWomenOnly(e.target.checked)} />
+            <span>I'm a woman and want a women-only group</span>
+          </label>
+        )}
       </div>
+      {joining && (
+        <p className="note">
+          Random Friday: join by 11 PM Thursday and we match you into a group of 4–6 who picked the same area, vibe and
+          budget. Nights run 9 PM to 1 AM.
+        </p>
+      )}
       {!me.id_verified && (
         <p className="note">Bars and clubs unlock once you're 21+ and we've checked your ID at your first night.</p>
       )}
@@ -222,8 +267,34 @@ function Planner({ me }) {
         <p className="note">Bringing friends to a bar? Everyone needs a valid ID showing they're 21+.</p>
       )}
       {error && <p className="error" role="alert">{error}</p>}
-      <button type="submit" className="cta" disabled={busy}>{busy ? "Creating your night…" : "Generate my night →"}</button>
+      <button type="submit" className="cta" disabled={busy}>{busy ? "One moment…" : joining ? "Join Random Friday →" : "Generate my night →"}</button>
     </form>
+  );
+}
+
+function Drop({ drop, maxBudget, onBack, onLeave }) {
+  const picks = { ...drop, hours: 4 };
+  if (drop.status === "matched") {
+    return (
+      <>
+        <p className="note">Your group: <strong>{drop.group.join(", ")}</strong>. Meet them at the first stop.</p>
+        <Night night={drop.night} inputs={picks} maxBudget={maxBudget} onBack={onBack} />
+      </>
+    );
+  }
+  const waiting = drop.status === "waiting";
+  return (
+    <section className="card">
+      <h1>{waiting ? "You're in for Random Friday" : "No group this week"}</h1>
+      <p className="meta">{[fmtDay(drop.date), drop.area, budgetLabel(drop.budget_inr, maxBudget), LABELS[drop.vibe]].join(" · ")}</p>
+      <p>
+        {waiting
+          ? "We form groups of 4–6 on Thursday night. Check back then to see your group and your night."
+          : "Not enough people picked the same area, vibe and budget this week. Plan a night with friends, or try next Friday."}
+      </p>
+      {waiting && <button type="button" className="cta ghost" onClick={onLeave}>Leave this Friday</button>}
+      <button type="button" className="link" onClick={onBack}>Back</button>
+    </section>
   );
 }
 

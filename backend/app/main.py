@@ -5,7 +5,7 @@ from fastapi import Depends, FastAPI
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app import auth, models, nights  # noqa: F401  (models registers tables on Base.metadata)
+from app import auth, drops, models, nights  # noqa: F401  (models registers tables on Base.metadata)
 from app.admin import mount_admin
 from app.db import Base, engine, get_db
 
@@ -22,6 +22,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Random Night API", lifespan=lifespan)
 app.include_router(auth.router)
 app.include_router(nights.router)
+app.include_router(drops.router)
 mount_admin(app)
 
 
