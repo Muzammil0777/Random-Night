@@ -166,6 +166,7 @@ function Planner({ me }) {
   const [inputs, setInputs] = useState({ date: nextFriday(), area: "", budget_inr: 2000, hours: 4, vibe: "party", company: "solo" });
   const [night, setNight] = useState(null);
   const [booked, setBooked] = useState(null);
+  const [last, setLast] = useState(null); // most recent night with a check-in: rate it, report someone
   const [drop, setDrop] = useState(null);
   const [womenOnly, setWomenOnly] = useState(false);
   const [error, setError] = useState(null);
@@ -180,6 +181,7 @@ function Planner({ me }) {
       setInputs((prev) => ({ ...prev, area: prev.area || o.areas[0] }));
     }).catch((e) => !ignore && setError(e.message));
     api("/plans/next").then((b) => !ignore && setBooked(b)).catch(() => {});
+    api("/plans/last").then((l) => !ignore && setLast(l)).catch(() => {});
     return () => { ignore = true; };
   }, []);
 
@@ -268,6 +270,8 @@ function Planner({ me }) {
   const today = isoDate(new Date());
   const lastDay = isoDate(new Date(Date.now() + 30 * 864e5));
   return (
+    <>
+    {last && <LastNight night={last} />}
     <form onSubmit={generate}>
       <h1>Hey {me.name}, what's the plan?</h1>
       <div className="card">
@@ -312,6 +316,7 @@ function Planner({ me }) {
       {error && <p className="error" role="alert">{error}</p>}
       <button type="submit" className="cta" disabled={busy}>{busy ? "One moment…" : joining ? "Join Random Friday →" : "Generate my night →"}</button>
     </form>
+    </>
   );
 }
 
@@ -364,6 +369,7 @@ function Night({ night, inputs, maxBudget, title = "Your night, curated.", child
                   {s.checked_in ? "Checked in ✓" : <>Show staff this code: <strong>{s.code.slice(0, 3)} {s.code.slice(3)}</strong></>}
                 </p>
               )}
+              {s.checked_in && <Stars stopId={s.plan_stop_id} title={s.title} initial={s.my_stars} />}
             </div>
           </li>
         ))}
@@ -380,7 +386,96 @@ function Night({ night, inputs, maxBudget, title = "Your night, curated.", child
       {night.stops[0]?.code && (
         <p className="muted small">Each code works once, only at that venue, only that night. Don't share it.</p>
       )}
+      {night.members?.length > 0 && <GroupSafety members={night.members} />}
       {children}
     </section>
+  );
+}
+
+// ---- after the night: ratings, report/block ----
+function LastNight({ night }) {
+  const toRate = night.stops.filter((s) => s.checked_in);
+  return (
+    <section className="card">
+      <h2>How was {fmtDay(night.inputs.date)}?</h2>
+      {toRate.map((s) => (
+        <div key={s.plan_stop_id}>
+          <p className="muted small">{s.title} · {s.venue}</p>
+          <Stars stopId={s.plan_stop_id} title={s.title} initial={s.my_stars} />
+        </div>
+      ))}
+      {night.members?.length > 0 && <GroupSafety members={night.members} />}
+    </section>
+  );
+}
+
+function Stars({ stopId, title, initial }) {
+  const [stars, setStars] = useState(initial);
+  const [error, setError] = useState(null);
+
+  async function rate(n) {
+    setError(null);
+    try {
+      setStars((await api("/ratings", { method: "POST", body: { plan_stop_id: stopId, stars: n } })).stars);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  return (
+    <div className="stars" role="group" aria-label={`Rate ${title}`}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <button key={n} type="button" aria-label={`${n} star${n > 1 ? "s" : ""}`} aria-pressed={stars === n}
+                className={stars >= n ? "on" : ""} onClick={() => rate(n)}>★</button>
+      ))}
+      {error && <p className="error" role="alert">{error}</p>}
+    </div>
+  );
+}
+
+function GroupSafety({ members }) {
+  return (
+    <div className="safety">
+      <h3>Your group</h3>
+      <p className="muted small">If anyone made you uneasy, tell us. Reporting also blocks them: you won't be grouped again.</p>
+      {members.map((m) => <MemberActions key={m.id} member={m} />)}
+    </div>
+  );
+}
+
+function MemberActions({ member }) {
+  const [done, setDone] = useState(null);
+  const [error, setError] = useState(null);
+
+  async function send(path, body, message) {
+    setError(null);
+    try {
+      await api(path, { method: "POST", body });
+      setDone(message);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  function report(e) {
+    e.preventDefault();
+    const reason = new FormData(e.currentTarget).get("reason");
+    send("/reports", { user_id: member.id, reason }, `Reported and blocked ${member.name}. Thank you for telling us.`);
+  }
+
+  if (done) return <p className="ok" role="status">{done}</p>;
+  return (
+    <details className="member">
+      <summary>{member.name}: report or block</summary>
+      <form onSubmit={report}>
+        <label htmlFor={`reason-${member.id}`}>What happened?</label>
+        <textarea id={`reason-${member.id}`} name="reason" minLength={3} maxLength={1000} rows={3} required />
+        {error && <p className="error" role="alert">{error}</p>}
+        <button type="submit" className="cta">Report and block</button>
+        <button type="button" className="link" onClick={() => send("/blocks", { user_id: member.id }, `Blocked ${member.name}.`)}>
+          Just block
+        </button>
+      </form>
+    </details>
   );
 }

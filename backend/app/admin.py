@@ -5,9 +5,11 @@ import secrets
 from sqladmin import Admin, ModelView
 from sqladmin.authentication import AuthenticationBackend
 from starlette.requests import Request
+from wtforms import FloatField
+from wtforms.validators import NumberRange, Optional
 
 from app.db import engine
-from app.models import Experience, User, Venue, VenueKey, VenueVisit
+from app.models import Experience, Report, User, Venue, VenueKey, VenueVisit
 
 MIN_ADMIN_PASSWORD = 12
 
@@ -36,7 +38,10 @@ class VenueAdmin(ModelView, model=Venue):
     column_list = [Venue.id, Venue.name, Venue.area, Venue.licensed, Venue.is_partner,
                    Venue.cpa_rate_inr, Venue.rating_avg, Venue.active]
     column_searchable_list = [Venue.name, Venue.area]
-    form_excluded_columns = [Venue.rating_avg]  # comes from guest ratings (task 9), never typed in
+    # rating_avg comes from guest ratings (task 9). Admins may set it to un-pause a venue below the 3.5 floor;
+    # it's recomputed from the latest raters at the next rating.
+    form_overrides = {"rating_avg": FloatField}  # sqladmin has no default field for Double
+    form_args = {"rating_avg": {"validators": [Optional(), NumberRange(min=0, max=5)]}}
     can_delete = False  # check-ins and invoices point at venues: untick "active" instead
 
 
@@ -74,6 +79,15 @@ class VenueVisitAdmin(ModelView, model=VenueVisit):
     can_delete = False
 
 
+class ReportAdmin(ModelView, model=Report):
+    """Safety reports from group members (the reporter has also blocked them). Read-only: act on the user."""
+    column_list = [Report.created_at, Report.reporter_id, Report.reported_id, Report.reason]
+    column_default_sort = [(Report.created_at, True)]
+    can_create = False
+    can_edit = False
+    can_delete = False
+
+
 admin: Admin | None = None
 
 
@@ -82,6 +96,6 @@ def mount_admin(app) -> Admin:
     # SECRET_KEY signs the admin session cookie. Without it a random key is used, so admin logins reset on restart.
     secret = os.environ.get("SECRET_KEY") or secrets.token_urlsafe(32)
     admin = Admin(app, engine, authentication_backend=PasswordAuth(secret_key=secret), title="Random Night admin")
-    for view in (VenueAdmin, ExperienceAdmin, UserAdmin, VenueKeyAdmin, VenueVisitAdmin):
+    for view in (VenueAdmin, ExperienceAdmin, UserAdmin, VenueKeyAdmin, VenueVisitAdmin, ReportAdmin):
         admin.add_view(view)
     return admin

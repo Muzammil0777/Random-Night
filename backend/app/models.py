@@ -250,3 +250,14 @@ class Report(Base):
     reported_id: Mapped[int] = fk("users.id")
     reason: Mapped[str]
     created_at: Mapped[datetime] = created_at()
+
+
+class Block(Base):
+    """Task 9: the blocker never shares a Random Friday group with the blocked user again."""
+    __tablename__ = "blocks"
+    __table_args__ = (UniqueConstraint("blocker_id", "blocked_id"),
+                      CheckConstraint("blocker_id <> blocked_id", name="not_self"))
+    id: Mapped[int] = mapped_column(primary_key=True)
+    blocker_id: Mapped[int] = fk("users.id")
+    blocked_id: Mapped[int] = fk("users.id")
+    created_at: Mapped[datetime] = created_at()

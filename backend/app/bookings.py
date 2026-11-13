@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.auth import IST, UserDep, _aware, first_name, now
 from app.generator import Stop
-from app.models import CheckIn, DropEntry, Experience, GroupMember, Night, Plan, PlanStop, Ticket, User
+from app.models import CheckIn, DropEntry, Experience, GroupMember, Night, Plan, PlanStop, Rating, Ticket, User
 from app.nights import DbDep, PlanInputs, StopOut, build_night, stop_out
 
 router = APIRouter(prefix="/api", tags=["bookings"])
@@ -22,8 +22,15 @@ def tonight() -> date:
 
 
 class TicketStopOut(StopOut):
+    plan_stop_id: int
     code: str           # show to venue staff; works once, only here, only that night
     checked_in: bool
+    my_stars: int | None  # this guest's rating (only checked-in stops can be rated)
+
+
+class Member(BaseModel):
+    id: int             # to report or block them; never their email or full name
+    name: str
 
 
 class BookedNight(BaseModel):
@@ -33,6 +40,7 @@ class BookedNight(BaseModel):
     total_inr: int
     bars_unlocked: bool
     group: list[str] | None = None  # Random Friday group: first names only
+    members: list[Member] = []      # the others in the group
 
 
 def get_night(db: Session, night_date: date, area: str) -> Night:
@@ -72,24 +80,28 @@ def has_night(db: Session, user: User, night_date: date) -> bool:
                      .limit(1)) is not None
 
 
-def first_names(db: Session, group_id: int) -> list[str]:
-    names = db.scalars(select(User.name).join(GroupMember, GroupMember.user_id == User.id)
-                       .where(GroupMember.group_id == group_id).order_by(User.id))
-    return [first_name(n) for n in names]
+def _members(db: Session, group_id: int) -> list[Member]:
+    rows = db.execute(select(User.id, User.name).join(GroupMember, GroupMember.user_id == User.id)
+                      .where(GroupMember.group_id == group_id).order_by(User.id))
+    return [Member(id=i, name=first_name(n)) for i, n in rows]
 
 
 def booked_night(db: Session, plan: Plan, user: User) -> BookedNight:
     rows = db.execute(
-        select(PlanStop, Ticket.code, CheckIn.id)
+        select(PlanStop, Ticket.code, CheckIn.id, Rating.stars)
         .join(Ticket, (Ticket.plan_stop_id == PlanStop.id) & (Ticket.user_id == user.id))
         .outerjoin(CheckIn, (CheckIn.plan_stop_id == PlanStop.id) & (CheckIn.user_id == user.id))
+        .outerjoin(Rating, (Rating.plan_stop_id == PlanStop.id) & (Rating.user_id == user.id))
         .where(PlanStop.plan_id == plan.id).order_by(PlanStop.starts_at)
         .options(joinedload(PlanStop.experience).joinedload(Experience.venue))).all()
     stops = [TicketStopOut(**stop_out(ps.experience, _aware(ps.starts_at), ps.is_partner).model_dump(),
-                           code=code, checked_in=checkin is not None) for ps, code, checkin in rows]
+                           plan_stop_id=ps.id, code=code, checked_in=checkin is not None, my_stars=stars)
+             for ps, code, checkin, stars in rows]
+    members = _members(db, plan.group_id) if plan.group_id else []
     return BookedNight(id=plan.id, inputs=plan.inputs, stops=stops,
                        total_inr=sum(s.price_per_head_inr for s in stops), bars_unlocked=plan.inputs["licensed_ok"],
-                       group=first_names(db, plan.group_id) if plan.group_id else None)
+                       group=[m.name for m in members] if plan.group_id else None,
+                       members=[m for m in members if m.id != user.id])
 
 
 @router.post("/plans", status_code=status.HTTP_201_CREATED)

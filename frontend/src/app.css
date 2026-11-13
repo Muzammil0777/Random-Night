@@ -57,3 +57,13 @@ fieldset.choice { border: 0; padding: 0; margin: 4px 0 0; }
 .nights caption { text-align: left; caption-side: bottom; padding-top: 6px; }
 .nights th, .nights td { text-align: left; padding: 8px 4px; border-bottom: 1px solid #2a3150; }
 a.cta { display: block; text-align: center; text-decoration: none; box-sizing: border-box; }
+.stars { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin: 4px 0 8px; }
+.stars button { background: none; border: 0; font-size: 1.8rem; line-height: 1; min-width: 44px; min-height: 44px;
+  color: #3a4266; cursor: pointer; }
+.stars button.on { color: var(--lime); }
+.safety { margin-top: 12px; display: grid; gap: 8px; }
+.safety h3 { margin: 0; font-size: 1rem; }
+.member summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
+.member form { display: grid; gap: 8px; margin-top: 8px; }
+textarea { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #2a3150; background: #0f1324;
+  color: var(--text); font: inherit; }

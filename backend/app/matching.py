@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.auth import IST, age_on, can_enter_licensed, now
 from app.bookings import get_night, has_night, save_plan
 from app.generator import NightRequest, generate
-from app.models import DropEntry, Experience, Group, GroupMember, User, Venue
+from app.models import Block, DropEntry, Experience, Group, GroupMember, User, Venue
 from app.nights import NIGHT_STARTS
 
 MIN_GROUP, MAX_GROUP = 4, 6
@@ -31,6 +31,19 @@ def group_sizes(n: int) -> list[int]:
     return [n // k + (i < n % k) for i in range(k)]
 
 
+def form_groups(people: list, clash) -> list[list]:
+    """Seat people (in join order) into group_sizes() seats, never two who clash (blocked each other).
+    A group left under 4 by a clash is dropped; its people wait for the next run."""
+    sizes = group_sizes(len(people))
+    groups: list[list] = [[] for _ in sizes]
+    for p in people:
+        for g, size in zip(groups, sizes):
+            if len(g) < size and not any(clash(p, q) for q in g):
+                g.append(p)
+                break
+    return [g for g in groups if len(g) >= MIN_GROUP]
+
+
 def match(db: Session, night_date: date) -> dict[str, int]:
     """Match every unmatched sign-up for night_date. Safe to rerun: leftovers are retried with newcomers."""
     # shortcut: no row locking, so two runs at once (or a leave mid-run) could misfire; the cron runs once a week
@@ -46,14 +59,19 @@ def match(db: Session, night_date: date) -> dict[str, int]:
         # 21+ verified and everyone else never share a group, so nobody under 21 is in a licensed-night group.
         buckets[(e.area, e.vibe, e.budget_inr, e.women_only, can_enter_licensed(e.user, night_date))].append(e)
 
+    ids = [e.user_id for e in entries]
+    blocked = {frozenset(pair) for pair in db.execute(
+        select(Block.blocker_id, Block.blocked_id).where(Block.blocker_id.in_(ids), Block.blocked_id.in_(ids)))}
+
+    def clash(a: DropEntry, b: DropEntry) -> bool:
+        return frozenset((a.user_id, b.user_id)) in blocked
+
     experiences = list(db.scalars(select(Experience).join(Venue).where(Venue.active)
                                   .options(joinedload(Experience.venue))))
     start = datetime.combine(night_date, NIGHT_STARTS, IST)
     groups = matched = 0
     for (area, vibe, budget, women_only, licensed_ok), people in buckets.items():
-        taken = 0
-        for size in group_sizes(len(people)):
-            members, taken = people[taken:taken + size], taken + size
+        for members in form_groups(people, clash):
             stops = generate(NightRequest(
                 area=area, budget_inr=budget, start=start, hours=DROP_HOURS, vibe=vibe, licensed_ok=licensed_ok,
                 youngest_age=min(age_on(m.user.dob, night_date) for m in members)), experiences)
@@ -70,7 +88,7 @@ def match(db: Session, night_date: date) -> dict[str, int]:
                 group_id=group.id)
             for m in members:
                 m.group_id = group.id
-            groups, matched = groups + 1, matched + size
+            groups, matched = groups + 1, matched + len(members)
     for e in entries:
         e.tried_at = now()
     db.commit()
