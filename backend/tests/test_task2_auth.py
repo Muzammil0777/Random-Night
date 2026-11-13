@@ -1,6 +1,7 @@
 """Task 2: magic-link login, sessions, profile, age rules."""
 from datetime import date, timedelta
 
+import httpx
 import pytest
 from sqlalchemy import update
 
@@ -123,6 +124,44 @@ def test_profile_update_cannot_change_dob(client, outbox):
     assert r.status_code == 200
     assert r.json()["emergency_contact"] == "+91 90000 00000"
     assert r.json()["dob"] == "1999-05-10"  # unchanged
+
+
+def _years_ago(n):
+    t = auth.today_ist()
+    try:
+        return t.replace(year=t.year - n)
+    except ValueError:  # today is Feb 29
+        return t.replace(year=t.year - n, day=28)
+
+
+@pytest.mark.parametrize("dob,code", [
+    (lambda: _years_ago(18), 202),                       # 18th birthday today (India date)
+    (lambda: _years_ago(18) + timedelta(days=1), 422),   # turns 18 tomorrow
+    (lambda: date(1800, 1, 1), 422),                     # nonsense DOB
+], ids=["18-today", "18-tomorrow", "year-1800"])
+def test_signup_age_boundary(client, outbox, dob, code):
+    assert client.post("/api/auth/request", json={**ADULT, "dob": dob().isoformat()}).status_code == code
+
+
+def test_used_links_do_not_count_toward_rate_limit(client, outbox):
+    for _ in range(3):
+        _login(client, outbox)
+    assert client.post("/api/auth/request", json=ADULT).status_code == 202
+
+
+def test_failed_email_returns_502_and_frees_quota(client, db, monkeypatch):
+    def down(email, link):
+        raise httpx.ConnectError("resend down")
+    monkeypatch.setattr(auth, "send_login_email", down)
+    assert client.post("/api/auth/request", json=ADULT).status_code == 502
+    assert db.query(LoginToken).count() == 0
+
+
+@pytest.mark.parametrize("name", [None, "   "], ids=["null", "blank"])
+def test_profile_name_cannot_be_blanked(client, outbox, name):
+    h = {"Authorization": f"Bearer {_login(client, outbox)['session']}"}
+    assert client.patch("/api/me", headers=h, json={"name": name}).status_code == 422
+    assert client.get("/api/me", headers=h).json()["name"] == "Asha"
 
 
 def test_production_never_logs_login_links(monkeypatch):

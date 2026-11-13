@@ -41,9 +41,9 @@ def _write_seed(tmp_path, venue_row, exp_row):
 
 
 @pytest.mark.parametrize("venue_row,exp_row,msg", [
-    ("Bar,Jubilee Hills,true,01:00,4.0,100,true", "Bar,Shots,meet,party,500,60,18", "min_age >= 21"),
+    ("Bar,Jubilee Hills,true,01:00,4.0,100,true", "Bar,Shots,meet,party,500,60,18", "min_age must be 21"),
     ("Bar,Jubilee Hills,true,01:00,4.0,100,true", "Nowhere,Shots,meet,party,500,60,21", "unknown venue"),
-    ("Cafe,Gachibowli,false,23:00,,0,false", "Cafe,Chat,meet,romance,200,60,18", "bad kind/vibes"),
+    ("Cafe,Gachibowli,false,23:00,,0,false", "Cafe,Chat,meet,romance,200,60,18", "vibes must be"),
 ], ids=["licensed-under-21", "unknown-venue", "unknown-vibe"])
 def test_seed_rejects_bad_rows(db, tmp_path, venue_row, exp_row, msg):
     with pytest.raises(ValueError, match=msg):
@@ -87,7 +87,7 @@ def test_plan_needs_exactly_one_owner(db, stop):
 
 @pytest.mark.parametrize("make", [
     lambda s: Rating(user_id=1, plan_stop_id=s.id, stars=6),
-    lambda s: Experience(venue_id=1, title="x", kind="meet", vibes=["chill"],
+    lambda s: Experience(venue_id=2, title="x", kind="meet", vibes=["chill"],  # unlicensed: hits the DB 18+ CHECK
                          price_per_head_inr=100, duration_min=30, min_age=17),
     lambda s: Venue(name="Neg", area="X", licensed=False, closes_at=time(23), cpa_rate_inr=-1),
 ], ids=["stars-over-5", "under-18-experience", "negative-cpa"])

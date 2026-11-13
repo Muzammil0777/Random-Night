@@ -8,7 +8,7 @@ from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
@@ -26,8 +26,15 @@ MIN_AGE = 18
 LICENSED_MIN_AGE = 21  # Telangana excise: bars/pubs/clubs
 
 
+IST = timezone(timedelta(hours=5, minutes=30))  # India has no DST, so a fixed offset is exact
+
+
 def now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def today_ist() -> date:
+    return now().astimezone(IST).date()
 
 
 def _aware(dt: datetime) -> datetime:
@@ -72,9 +79,10 @@ def send_login_email(email: str, link: str) -> None:
 
 # ---- schemas ----
 class LinkRequest(BaseModel):
+    model_config = {"str_strip_whitespace": True}
     email: EmailStr
     name: str | None = Field(default=None, min_length=1, max_length=80)
-    dob: date | None = None
+    dob: date | None = Field(default=None, ge=date(1900, 1, 1))
 
 
 class VerifyRequest(BaseModel):
@@ -93,7 +101,16 @@ class Me(BaseModel):
 
 
 class MeUpdate(BaseModel):  # dob and email are deliberately not editable (age gate integrity)
+    model_config = {"str_strip_whitespace": True}
     name: str | None = Field(default=None, min_length=1, max_length=80)
+
+    @field_validator("name")
+    @classmethod
+    def name_not_null(cls, v: str | None) -> str:
+        if v is None:
+            raise ValueError("name can't be empty")
+        return v
+
     gender: str | None = Field(default=None, max_length=30)
     emergency_contact: str | None = Field(default=None, max_length=120)
 
@@ -122,17 +139,24 @@ UserDep = Annotated[User, Depends(current_user)]
 def request_link(body: LinkRequest, db: DbDep) -> dict[str, bool]:
     """Always 202 for valid input, whether or not the email has an account (no account enumeration)."""
     email = body.email.lower()
-    if body.dob and age_on(body.dob, now().date()) < MIN_AGE:
+    if body.dob and age_on(body.dob, today_ist()) < MIN_AGE:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Random Night is 18+")
-    recent = db.scalar(select(func.count(LoginToken.id)).where(
-        LoginToken.email == email, LoginToken.expires_at > now()))
-    if recent >= MAX_LINKS_PER_WINDOW:
+    pending = db.scalar(select(func.count(LoginToken.id)).where(
+        LoginToken.email == email, LoginToken.used_at.is_(None), LoginToken.expires_at > now()))
+    if pending >= MAX_LINKS_PER_WINDOW:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Too many links requested, try again later")
     token = secrets.token_urlsafe(32)
-    db.add(LoginToken(token_hash=_hash(token), email=email, name=body.name, dob=body.dob,
-                      expires_at=now() + LOGIN_TTL))
+    row = LoginToken(token_hash=_hash(token), email=email, name=body.name, dob=body.dob,
+                     expires_at=now() + LOGIN_TTL)
+    db.add(row)
     db.commit()
-    send_login_email(email, f"{os.environ.get('APP_URL', 'http://localhost:5173')}/login?token={token}")
+    try:
+        send_login_email(email, f"{os.environ.get('APP_URL', 'http://localhost:5173')}/login?token={token}")
+    except httpx.HTTPError:
+        log.exception("login email failed for %s", email)
+        db.delete(row)  # a failed send must not eat the user's rate-limit quota
+        db.commit()
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Couldn't send the email, please try again")
     return {"sent": True}
 
 

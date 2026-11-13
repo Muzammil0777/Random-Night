@@ -1,7 +1,7 @@
 """Tables from tasks/plan.md §3. Money is whole rupees (int). Times are timezone-aware."""
 from datetime import date, datetime, time
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, UniqueConstraint, func
+from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, UniqueConstraint, event, func, select
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -85,6 +85,35 @@ class Experience(Base):
     price_per_head_inr: Mapped[int]
     duration_min: Mapped[int]
     min_age: Mapped[int] = mapped_column(default=18)
+
+
+def check_experience(exp: Experience, licensed: bool) -> None:
+    """Rules every writer (seed, admin, future API) must pass. Raises ValueError with a readable message."""
+    if exp.kind not in KINDS:
+        raise ValueError(f"{exp.title!r}: kind must be one of {', '.join(KINDS)}")
+    if not exp.vibes or not set(exp.vibes) <= set(VIBES):
+        raise ValueError(f"{exp.title!r}: vibes must be a non-empty list from {', '.join(VIBES)}")
+    if licensed and exp.min_age < 21:
+        # Telangana: under-21s can't enter licensed venues.
+        raise ValueError(f"{exp.title!r} is at a licensed venue, so min_age must be 21 or more")
+
+
+@event.listens_for(Experience, "before_insert")
+@event.listens_for(Experience, "before_update")
+def _validate_experience(mapper, connection, target: Experience) -> None:
+    venue = target.__dict__.get("venue")  # already-loaded relationship; never lazy-load inside a flush
+    licensed = venue.licensed if venue is not None else connection.scalar(
+        select(Venue.licensed).where(Venue.id == target.venue_id))
+    check_experience(target, bool(licensed))
+
+
+@event.listens_for(Venue, "before_update")
+def _licensed_venue_needs_21(mapper, connection, target: Venue) -> None:
+    # Flipping a venue to licensed must not leave experiences there open to under-21s.
+    if target.licensed and connection.scalar(select(func.count(Experience.id)).where(
+            Experience.venue_id == target.id, Experience.min_age < 21)):
+        raise ValueError(f"{target.name!r} has experiences open to under-21s; "
+                         "set their min_age to 21 before marking it licensed")
 
 
 class Night(Base):

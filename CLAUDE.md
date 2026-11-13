@@ -2,6 +2,7 @@
 
 Hyderabad-first app that builds a curated night out (area, budget, time, vibe + company mode) and matches solo users into groups of 4–6. It's free for users; venues pay per checked-in guest.
 
+- Repo: https://github.com/Muzammil0777/Random-Night (git remote `origin`, branch `main`). Push only when asked.
 - Plan: `tasks/plan.md` (one task = one commit, in table order)
 - Research: `research/marketing-research.md`
 
@@ -9,6 +10,7 @@ Hyderabad-first app that builds a curated night out (area, budget, time, vibe + 
 - Backend: `backend/`, FastAPI (sync routes + sync SQLAlchemy 2.0), Python **3.12** (matches Vercel; don't use the system 3.15).
 - DB: Postgres on **Neon** (project `cold-unit-37714956`, Singapore). `neon env pull` writes `DATABASE_URL` (pooled, for the app) and `DATABASE_URL_UNPOOLED` (direct, for migrations) to the repo-root `.env.local`. `backend/.env` holds `TEST_DATABASE_URL` (Neon branch `test`, where tests drop all tables). Both files are gitignored. With no `.env.local` the app falls back to SQLite, so **use only portable column types** (no PG arrays/enums; use `JSON`, `String`, `Integer`).
 - Auth (`app/auth.py`): magic link + bearer session, both stored hashed. Env: `RESEND_API_KEY`, `EMAIL_FROM`, `APP_URL`. Without `RESEND_API_KEY` the link is logged **only** when `APP_URL` is localhost (default); otherwise the request returns 503. Use `can_enter_licensed(user, night_date)` for every 21+ decision, never a raw DOB check.
+- Admin (`app/admin.py`, sqladmin at `/admin`): one shared `ADMIN_PASSWORD` (12+ chars, else nobody can log in) + `SECRET_KEY` for the session cookie, both in `backend/.env` locally. Venues/experiences can't be deleted (untick `active`); users: only `id_verified` is editable. Experience rules live in `models.check_experience` + ORM events, so every writer is validated.
 - Schema changes: `create_all` only adds missing tables; it never alters existing ones. Keep changes additive until Alembic lands (before the first Vercel deploy).
 - Neon config: `neon.ts` (Postgres only; branch `test` exempt from auto-expiry). Apply with `neon deploy`.
 - Money is stored as whole rupees in `Integer` columns (`*_inr`), never floats.
@@ -19,7 +21,7 @@ Hyderabad-first app that builds a curated night out (area, budget, time, vibe + 
 ```bash
 py -3.12 -m venv .venv && .venv/Scripts/python -m pip install -r requirements.txt
 TEST_DATABASE_URL= .venv/Scripts/python -m pytest -q   # fast loop: in-memory SQLite
-.venv/Scripts/python -m pytest -q                      # real Postgres: Neon "test" branch (~2 min, before commits)
+.venv/Scripts/python -m pytest -q                      # real Postgres: Neon "test" branch (~8 min, before commits). NEVER run two at once: each test drops all tables
 .venv/Scripts/python -m app.seed                       # seeds the branch in DATABASE_URL (Neon production)
 .venv/Scripts/python -m uvicorn app.main:app --reload
 ```
