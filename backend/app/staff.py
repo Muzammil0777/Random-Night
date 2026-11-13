@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.auth import _aware, _hash, first_name, now
 from app.auth import IST
 from app.bookings import tonight
+from app import ratelimit
 from app.db import SessionLocal
 from app.models import CheckIn, Experience, PlanStop, Ticket, User, Venue, VenueKey, VenueVisit
 from app.nights import DbDep
@@ -25,6 +26,8 @@ from app.nights import DbDep
 router = APIRouter(prefix="/api/staff", tags=["staff"])
 COOKIE = "rn_staff"  # httpOnly, separate from guest sessions
 COOKIE_TTL = timedelta(days=30)  # door phones stay logged in
+# A mistyping door phone shouldn't lock the venue mid-rush, but walking a million codes stays impossible.
+MAX_WRONG_CODES, WRONG_CODE_WINDOW = 30, timedelta(minutes=10)
 DOOR_OPEN = timedelta(hours=1)  # a stop's codes work from 1 h before it starts until 1 h after it ends
 
 
@@ -84,11 +87,15 @@ def staff_logout(response: Response) -> None:
 
 @router.post("/checkin")
 def check_in(body: CodeIn, key: StaffDep, db: DbDep) -> CheckedIn:
+    # Wrong codes are capped per key, so a leaked key can't walk the million codes to bill no-shows.
+    if ratelimit.count(db, f"door:{key.id}", WRONG_CODE_WINDOW) >= MAX_WRONG_CODES:
+        db.commit()
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Too many wrong codes. Wait a bit or call Random Night.")
     # One lookup enforces all three rules: this code, tonight, at a stop of this venue.
-    # shortcut: no per-key throttle on wrong codes yet (plan task 11); a venue guessing codes only hits its own guests.
     ticket = db.scalar(select(Ticket).join(PlanStop).join(Experience).where(
         Ticket.code == body.code, Ticket.night_date == tonight(), Experience.venue_id == key.venue_id))
     if ticket is None:
+        ratelimit.record(db, f"door:{key.id}")
         raise HTTPException(status.HTTP_404_NOT_FOUND, "That code isn't for a stop here tonight.")
     stop = ticket.plan_stop
     opens = _aware(stop.starts_at) - DOOR_OPEN

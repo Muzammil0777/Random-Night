@@ -35,7 +35,7 @@ A user in Hyderabad picks four inputs: **area, budget (₹1K/₹2K/₹5K+), time
 
 ### Hosting & distribution (minimal cost, grow later)
 **Stage 1: building + free founding-venue weekends (₹0/month + domain)**
-- **Vercel Hobby (free):** hosts the React build plus FastAPI as Python functions, and deploys on every `git push`. Set the function region to Mumbai (`bom1`), closest to the DB.
+- **Vercel Hobby (free):** hosts the React build plus FastAPI as Python functions, and deploys on every `git push`. Set the function region to Singapore (`sin1`), next to the Neon DB: one hop from Hyderabad beats several DB round trips per request.
 - **Neon Free:** Postgres with 1 GB storage and 100 compute-hours/month per project, in the Singapore region (Mumbai isn't confirmed). The DB sleeps when idle, so the first request after a quiet spell is a bit slower.
 - **Weekly matching job:** Vercel Cron calls `/api/jobs/match` on Thursday night.
 - **Login emails:** Resend or Brevo free tier.
@@ -101,7 +101,9 @@ Invoices are a query (`checkins × cpa_rate` per venue per month), not a table.
 | 8 | Venue dashboard + monthly invoice CSV | **Tests:** invoice total = checked-in guests × rate; no-shows are not billed |
 | 9 | Ratings + report/block + auto-pause for venues below the rating floor | **Tests:** a venue under the floor is excluded from the next generation |
 | 10 | Safety: share plan with a contact, SOS button | Manual test on a phone |
-| 11 | Landing page + waitlist with referral bump; PWA manifest + install prompt; deploy to Vercel + Neon, with a weekly cron (`GET /api/jobs/match` Thursday ~23:30 IST = 18:00 UTC; set `CRON_SECRET`, 16+ chars); per-IP rate limit on `/api/auth/request` (Vercel firewall rule or app-level); set `RESEND_API_KEY`, `EMAIL_FROM`, `APP_URL`, `ADMIN_PASSWORD`, `SECRET_KEY` in Vercel; fail fast at boot if `SECRET_KEY`/`APP_URL` missing in prod; admin session cookie `https_only`; throttle `/admin/login`; throttle wrong codes on `/api/staff/checkin` per venue key; SPA rewrite so `/venue` serves index.html | Live HTTPS URL works; installs on Android and iPhone; cron run creates groups |
+| 11a | Deploy-ready backend: Alembic baseline (create_all only for local SQLite); `vercel.json` with Services (frontend `frontend/`, FastAPI `backend/`; `/api/*` and `/admin*` to FastAPI, everything else to the SPA incl. `/venue`), region `sin1` next to Neon, weekly cron `GET /api/jobs/match` Thu 18:00 UTC (23:30 IST) with `CRON_SECRET`; fail fast at boot in prod if any of `DATABASE_URL`, `SECRET_KEY`, `ADMIN_PASSWORD`, `CRON_SECRET`, `RESEND_API_KEY`, `EMAIL_FROM` is missing/weak; DB-backed rate limits (per-IP `/api/auth/request`, per-IP `/admin/login`, wrong codes per venue key on `/api/staff/checkin`); admin cookie `https_only`; security headers | **Tests:** migrations build the same schema as the models; prod boot refuses missing secrets; each limit returns 429 past its cap |
+| 11b | Landing page + waitlist with referral bump; PWA manifest + install prompt | Installs on Android and iPhone |
+| 11c | First deploy (with you, on your Vercel account): link the repo, set env vars, run `alembic upgrade head` on Neon production, seed real venues, smoke-test | Live HTTPS URL works; a cron run creates groups |
 
 **Order matters.** Tasks 1 → 2 → 4 → 7 → 8 are the money path. Tasks 3, 5, 6, 9 and 10 build on that path.
 

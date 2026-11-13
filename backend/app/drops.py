@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app import ratelimit
 from app.auth import IST, UserDep, now, today_ist
 from app.db import get_db
 from app.matching import is_woman, match
@@ -108,4 +109,5 @@ def run_match(request: Request, db: DbDep, night_date: date | None = None) -> di
     given = request.headers.get("authorization", "")
     if len(secret) < 16 or not secrets.compare_digest(given.encode(), f"Bearer {secret}".encode()):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not allowed")
+    ratelimit.prune(db)  # weekly housekeeping for the rate-limit table
     return match(db, night_date or upcoming_friday(today_ist()))

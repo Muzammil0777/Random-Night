@@ -1,7 +1,7 @@
 """Tables from tasks/plan.md §3. Money is whole rupees (int). Times are timezone-aware."""
 from datetime import date, datetime, time
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, UniqueConstraint, event, func, select
+from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, UniqueConstraint, event, func, select
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -261,3 +261,13 @@ class Block(Base):
     blocker_id: Mapped[int] = fk("users.id")
     blocked_id: Mapped[int] = fk("users.id")
     created_at: Mapped[datetime] = created_at()
+
+
+class RateHit(Base):
+    """Task 11a: one row per counted attempt (login-link request, admin login, wrong door code).
+    In the database, not in memory, because serverless instances don't share memory."""
+    __tablename__ = "rate_hits"
+    __table_args__ = (Index("ix_rate_hits_key_at", "key", "at"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str]  # e.g. "auth-ip:1.2.3.4", "door:17"
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)  # prune() scans by age

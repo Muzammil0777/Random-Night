@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app import admin as admin_mod
 from app import models  # noqa: F401
 from app.db import Base, get_db, make_engine
 from app.main import app
@@ -14,6 +15,13 @@ TEST_URL = os.environ.get("TEST_DATABASE_URL")
 if TEST_URL and TEST_URL == os.environ.get("DATABASE_URL"):
     # Each run drops all tables and each test truncates them; never let that point at real data.
     raise RuntimeError("TEST_DATABASE_URL must be a separate Neon branch, not DATABASE_URL")
+
+
+def _no_real_db():
+    raise RuntimeError("a test reached app.db.SessionLocal (DATABASE_URL = real data); use the test db")
+
+
+admin_mod.PasswordAuth.session_maker = staticmethod(_no_real_db)  # admin tests point it at the test db
 
 
 @pytest.fixture(scope="session")

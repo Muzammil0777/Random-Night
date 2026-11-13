@@ -1,6 +1,7 @@
 """Admin panel at /admin (sqladmin): venues, experiences, and ID checks on users."""
 import os
 import secrets
+from datetime import timedelta
 
 from sqladmin import Admin, ModelView
 from sqladmin.authentication import AuthenticationBackend
@@ -8,22 +9,36 @@ from starlette.requests import Request
 from wtforms import FloatField
 from wtforms.validators import NumberRange, Optional
 
-from app.db import engine
+from app import ratelimit
+from app.db import SessionLocal, engine
 from app.models import Experience, Report, User, Venue, VenueKey, VenueVisit
 
 MIN_ADMIN_PASSWORD = 12
+MAX_ADMIN_FAILS, ADMIN_FAIL_WINDOW = 5, timedelta(minutes=15)  # per IP
+MAX_ADMIN_FAILS_ALL = 50  # across all IPs per window: rotating IPs doesn't buy more guesses
 
 
 class PasswordAuth(AuthenticationBackend):
     """One shared admin password from ADMIN_PASSWORD. Unset or too short = nobody can log in."""
+    session_maker = SessionLocal  # tests point this at their own database
 
     async def login(self, request: Request) -> bool:
         expected = os.environ.get("ADMIN_PASSWORD", "")
         given = str((await request.form()).get("password", ""))
-        # Compare bytes: compare_digest raises on non-ASCII str.
-        ok = len(expected) >= MIN_ADMIN_PASSWORD and secrets.compare_digest(given.encode(), expected.encode())
-        if ok:
-            request.session["admin"] = True
+        keys = [f"admin-ip:{ip}"] if (ip := ratelimit.client_ip(request)) else []
+        with self.session_maker() as db:
+            if ratelimit.count(db, "admin-all", ADMIN_FAIL_WINDOW) >= MAX_ADMIN_FAILS_ALL or any(
+                    ratelimit.count(db, k, ADMIN_FAIL_WINDOW) >= MAX_ADMIN_FAILS for k in keys):
+                db.commit()
+                return False  # locked out for the window, even with the right password
+            # Compare bytes: compare_digest raises on non-ASCII str.
+            ok = len(expected) >= MIN_ADMIN_PASSWORD and secrets.compare_digest(given.encode(), expected.encode())
+            if ok:
+                db.commit()
+                request.session["admin"] = True
+            else:
+                for k in [*keys, "admin-all"]:
+                    ratelimit.record(db, k)
         return ok
 
     async def logout(self, request: Request) -> bool:
@@ -95,7 +110,9 @@ def mount_admin(app) -> Admin:
     global admin
     # SECRET_KEY signs the admin session cookie. Without it a random key is used, so admin logins reset on restart.
     secret = os.environ.get("SECRET_KEY") or secrets.token_urlsafe(32)
-    admin = Admin(app, engine, authentication_backend=PasswordAuth(secret_key=secret), title="Random Night admin")
+    https = os.environ.get("APP_URL", "").startswith("https://")
+    backend = PasswordAuth(secret_key=secret, https_only=https, same_site="strict")  # admin cookie never over http
+    admin = Admin(app, engine, authentication_backend=backend, title="Random Night admin")
     for view in (VenueAdmin, ExperienceAdmin, UserAdmin, VenueKeyAdmin, VenueVisitAdmin, ReportAdmin):
         admin.add_view(view)
     return admin

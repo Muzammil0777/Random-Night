@@ -11,11 +11,11 @@ Hyderabad-first app that builds a curated night out (area, budget, time, vibe + 
 - DB: Postgres on **Neon** (project `cold-unit-37714956`, Singapore). `neon env pull` writes `DATABASE_URL` (pooled, for the app) and `DATABASE_URL_UNPOOLED` (direct, for migrations) to the repo-root `.env.local`. `backend/.env` holds `TEST_DATABASE_URL` (Neon branch `test`, where tests drop all tables). Both files are gitignored. With no `.env.local` the app falls back to SQLite, so **use only portable column types** (no PG arrays/enums; use `JSON`, `String`, `Integer`).
 - Auth (`app/auth.py`): magic link + bearer session, both stored hashed. Env: `RESEND_API_KEY`, `EMAIL_FROM`, `APP_URL`. Without `RESEND_API_KEY` the link is logged **only** when `APP_URL` is localhost (default); otherwise the request returns 503. Use `can_enter_licensed(user, night_date)` for every 21+ decision, never a raw DOB check.
 - Admin (`app/admin.py`, sqladmin at `/admin`): one shared `ADMIN_PASSWORD` (12+ chars, else nobody can log in) + `SECRET_KEY` for the session cookie, both in `backend/.env` locally. Venues/experiences can't be deleted (untick `active`); users: only `id_verified` is editable. Experience rules live in `models.check_experience` + ORM events, so every writer is validated.
-- Schema changes: `create_all` only adds missing tables; it never alters existing ones. Keep changes additive until Alembic lands (before the first Vercel deploy).
+- Schema changes go through **Alembic** (`backend/migrations/`): change the model, then `alembic revision --autogenerate -m "..."`, read the generated file, and keep `tests/test_task11a_deploy.py` green (migrations must build exactly the models' schema). Postgres is never `create_all`ed by the app; only local SQLite is, at boot. Production: `alembic upgrade head` (env.py prefers `DATABASE_URL_UNPOOLED`, the direct URL).
 - Neon config: `neon.ts` (Postgres only; branch `test` exempt from auto-expiry). Apply with `neon deploy`.
 - Money is stored as whole rupees in `Integer` columns (`*_inr`), never floats.
 - Frontend (from task 5): Vite + React PWA in `frontend/`.
-- Hosting: Vercel (Hobby while building; **Pro before the first paid venue invoice**, because Hobby is non-commercial only) + Neon. Keep code host-agnostic: env vars only.
+- Hosting: Vercel (Hobby while building; **Pro before the first paid venue invoice**, because Hobby is non-commercial only) + Neon. `vercel.json` uses Services: `frontend/` (Vite) and `backend/` (FastAPI, `app.main:app`); `/api/*` and `/admin*` go to FastAPI, the rest to the SPA; region `sin1` (next to Neon); weekly cron `GET /api/jobs/match` Thu 18:00 UTC. In production the app refuses to start without `APP_URL` (https), `DATABASE_URL`, `SECRET_KEY` (32+), `ADMIN_PASSWORD` (12+), `CRON_SECRET` (16+), `RESEND_API_KEY`, `EMAIL_FROM`. Keep code host-agnostic: env vars only.
 
 ## Commands (Git Bash, run from `backend/`)
 ```bash
@@ -24,6 +24,7 @@ TEST_DATABASE_URL= .venv/Scripts/python -m pytest -q   # fast loop: in-memory SQ
 .venv/Scripts/python -m pytest -q                      # real Postgres: Neon "test" branch (~8 min for ~200 tests; schema rebuilt once per run, tables truncated per test; before commits). NEVER run two at once: each run wipes the branch
 .venv/Scripts/python -m app.seed                       # seeds the branch in DATABASE_URL (Neon production)
 .venv/Scripts/python -m uvicorn app.main:app --reload
+.venv/Scripts/alembic revision --autogenerate -m "what changed"   # after a model change; review the file
 .venv/Scripts/python -m app.staff "Venue name" "Front door"  # door-staff key for /venue, shown once; revoke in /admin
 ```
 

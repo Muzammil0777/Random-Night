@@ -13,6 +13,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
+from app import ratelimit
 from app.db import get_db
 from app.models import LoginToken, User, UserSession
 
@@ -23,6 +24,7 @@ DbDep = Annotated[Session, Depends(get_db)]
 LOGIN_TTL = timedelta(minutes=15)
 SESSION_TTL = timedelta(days=30)
 MAX_LINKS_PER_WINDOW = 3  # per email per LOGIN_TTL; stops inbox-bombing
+MAX_LINKS_PER_IP = 30     # per IP per LOGIN_TTL (task 11a); generous: mobile carriers share IPs (CGNAT)
 MIN_AGE = 18
 LICENSED_MIN_AGE = 21  # Telangana excise: bars/pubs/clubs
 
@@ -163,11 +165,14 @@ UserDep = Annotated[User, Depends(current_user)]
 
 # ---- routes ----
 @router.post("/auth/request", status_code=status.HTTP_202_ACCEPTED)
-def request_link(body: LinkRequest, db: DbDep) -> dict[str, bool]:
+def request_link(body: LinkRequest, db: DbDep, request: Request) -> dict[str, bool]:
     """Always 202 for valid input, whether or not the email has an account (no account enumeration)."""
     email = body.email.lower()
     if body.dob and age_on(body.dob, today_ist()) < MIN_AGE:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Random Night is 18+")
+    # Per IP as well as per email: stops one machine mailing links to many inboxes.
+    if ip := ratelimit.client_ip(request):
+        ratelimit.limit(db, f"auth-ip:{ip}", MAX_LINKS_PER_IP, LOGIN_TTL)
     pending = db.scalar(select(func.count(LoginToken.id)).where(
         LoginToken.email == email, LoginToken.used_at.is_(None), LoginToken.expires_at > now()))
     if pending >= MAX_LINKS_PER_WINDOW:

@@ -19,6 +19,7 @@ def admin_client(client, db, monkeypatch):
     maker = sessionmaker(db.get_bind(), expire_on_commit=False)
     for view in admin_mod.admin.views:
         monkeypatch.setattr(view, "session_maker", maker)
+    monkeypatch.setattr(admin_mod.PasswordAuth, "session_maker", staticmethod(maker))
     load(db)
     return client
 
@@ -148,3 +149,9 @@ def test_admin_cannot_create_or_delete_users(admin_client, user):
     c = _logged_in(admin_client)
     assert c.get("/admin/user/create").status_code in (403, 404)
     assert c.delete(f"/admin/user/delete?pks={user.id}").status_code in (403, 404, 405)
+
+
+def test_admin_login_locks_after_repeated_failures(admin_client):
+    for _ in range(admin_mod.MAX_ADMIN_FAILS):
+        assert _login(admin_client, "wrong-password-123").status_code != 302
+    assert _login(admin_client).status_code != 302  # locked out for the window, even with the right password
