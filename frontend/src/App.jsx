@@ -79,7 +79,7 @@ export default function App() {
       <main>
         {me === undefined && <p className="muted" aria-live="polite">Loading…</p>}
         {me === null && <Login initialError={bootError} />}
-        {me && <Planner me={me} />}
+        {me && <Planner me={me} onMe={setMe} />}
       </main>
     </div>
   );
@@ -161,7 +161,7 @@ function Choice({ legend, name, options, value, onChange, label = (o) => LABELS[
   );
 }
 
-function Planner({ me }) {
+function Planner({ me, onMe }) {
   const [opts, setOpts] = useState(null);
   const [inputs, setInputs] = useState({ date: nextFriday(), area: "", budget_inr: 2000, hours: 4, vibe: "party", company: "solo" });
   const [night, setNight] = useState(null);
@@ -246,10 +246,14 @@ function Planner({ me }) {
   }
 
   const joining = inputs.company === "new_people";
-  if (drop) return <Drop drop={drop} maxBudget={opts.budgets.at(-1)} onBack={() => setDrop(null)} onLeave={leaveDrop} />;
+  if (drop) {
+    return <Drop drop={drop} me={me} onMe={onMe} maxBudget={opts.budgets.at(-1)} onBack={() => setDrop(null)}
+                 onLeave={leaveDrop} />;
+  }
   if (booked && opts) {
     return (
       <Night night={booked} inputs={booked.inputs} maxBudget={opts.budgets.at(-1)} title="You're booked.">
+        <Safety night={booked} me={me} onMe={onMe} />
         {error && <p className="error" role="alert">{error}</p>}
         {!booked.group && <button type="button" className="cta ghost" onClick={cancel}>Cancel this night</button>}
         <button type="button" className="link" onClick={() => setBooked(null)}>Plan another night</button>
@@ -320,13 +324,14 @@ function Planner({ me }) {
   );
 }
 
-function Drop({ drop, maxBudget, onBack, onLeave }) {
+function Drop({ drop, me, onMe, maxBudget, onBack, onLeave }) {
   const picks = { ...drop, hours: 4 };
   if (drop.status === "matched") {
     return (
       <>
         <p className="note">Your group: <strong>{drop.group.join(", ")}</strong>. Meet them at the first stop.</p>
         <Night night={drop.night} inputs={picks} maxBudget={maxBudget} title="Your group's night.">
+          <Safety night={drop.night} me={me} onMe={onMe} />
           <button type="button" className="cta ghost" onClick={onBack}>Back</button>
         </Night>
       </>
@@ -477,5 +482,94 @@ function MemberActions({ member }) {
         </button>
       </form>
     </details>
+  );
+}
+
+// ---- safety (task 10): share the plan, SOS ----
+const whatsapp = (phone, text) => `https://wa.me/${phone ? phone.replace("+", "") : ""}?text=${encodeURIComponent(text)}`;
+
+function planText(night) {
+  const stops = night.stops.map((s) => `${fmtTime(s.starts_at)} ${s.title}, ${s.venue}, ${s.area}`);
+  const who = night.group ? `with a Random Night group of ${night.group.length}` : "planned with Random Night";
+  const day = new Date(`${night.inputs.date}T12:00:00+05:30`)
+    .toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short", timeZone: TZ });
+  return [`My night out on ${day} (${who}):`, ...stops, "I'll message you when I'm home."].join("\n");
+}
+
+function Safety({ night, me, onMe }) {
+  const [sos, setSos] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const contact = me.emergency_contact;
+
+  async function share() {
+    const text = planText(night); // no check-in codes: those stay with the guest
+    if (!contact && navigator.share) {
+      await navigator.share({ text }).catch(() => {}); // closing the share sheet isn't an error
+      return;
+    }
+    window.open(whatsapp(contact, text), "_blank", "noopener");
+  }
+
+  function sendLocation() {
+    // location.href, not window.open: this runs after the location callback, where pop-ups get blocked.
+    const send = (where) => { window.location.href = whatsapp(contact, `SOS from Random Night: I need help. ${where}`); };
+    if (!navigator.geolocation) return send(`Tonight's plan: ${night.stops.map((s) => s.venue).join(" → ")}`);
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (p) => { setLocating(false); send(`I'm here: https://maps.google.com/?q=${p.coords.latitude},${p.coords.longitude}`); },
+      () => { setLocating(false); send(`Tonight's plan: ${night.stops.map((s) => s.venue).join(" → ")}`); },
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
+  }
+
+  return (
+    <section className="card safety-card" aria-labelledby="safety-title">
+      <h2 id="safety-title">Safety</h2>
+      {!contact && <ContactForm onMe={onMe} />}
+      <button type="button" className="cta ghost" onClick={share}>
+        {contact ? "Share my plan on WhatsApp" : "Share my plan"}
+      </button>
+      <button type="button" className="cta sos" aria-expanded={sos} aria-controls="sos-panel" onClick={() => setSos(!sos)}>
+        SOS
+      </button>
+      {sos && (
+        <div id="sos-panel" className="sos-panel">
+          <a className="cta sos" href="tel:112">Call 112 (emergency)</a>
+          {contact ? (
+            <>
+              <a className="cta ghost" href={`tel:${contact}`}>Call my emergency contact</a>
+              <button type="button" className="cta ghost" onClick={sendLocation} disabled={locating}>
+                {locating ? "Finding you…" : "Send my location on WhatsApp"}
+              </button>
+            </>
+          ) : (
+            <p className="muted small">Add an emergency contact above to call them or send your location in one tap.</p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ContactForm({ onMe }) {
+  const [error, setError] = useState(null);
+
+  async function save(e) {
+    e.preventDefault();
+    setError(null);
+    try {
+      onMe(await api("/me", { method: "PATCH", body: { emergency_contact: new FormData(e.currentTarget).get("phone") } }));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  return (
+    <form className="contact" onSubmit={save}>
+      <label htmlFor="phone">Emergency contact's phone</label>
+      <input id="phone" name="phone" type="tel" inputMode="tel" autoComplete="off" placeholder="+91 98765 43210" required />
+      {error && <p className="error" role="alert">{error}</p>}
+      <button type="submit" className="cta">Save contact</button>
+    </form>
   );
 }

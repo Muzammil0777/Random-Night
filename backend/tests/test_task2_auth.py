@@ -139,7 +139,7 @@ def test_profile_update_cannot_change_dob(client, outbox):
     h = {"Authorization": f"Bearer {_login(client, outbox)['session']}"}
     r = client.patch("/api/me", headers=h, json={"emergency_contact": "+91 90000 00000", "dob": "1980-01-01"})
     assert r.status_code == 200
-    assert r.json()["emergency_contact"] == "+91 90000 00000"
+    assert r.json()["emergency_contact"] == "+919000000000"  # normalised for tel:/WhatsApp links
     assert r.json()["dob"] == "1999-05-10"  # unchanged
 
 
@@ -186,3 +186,22 @@ def test_production_never_logs_login_links(monkeypatch):
     with pytest.raises(auth.HTTPException) as e:
         auth.send_login_email("a@example.com", "https://randomnight.in/login?token=abc")
     assert e.value.status_code == 503
+
+
+@pytest.mark.parametrize("given,stored", [
+    ("98765 43210", "+919876543210"),       # Indian mobile, no country code
+    ("098765-43210", "+919876543210"),      # trunk 0
+    ("+91 98765 43210", "+919876543210"),
+    ("+44 20 7946 0958", "+442079460958"),  # abroad is fine
+    ("", None),                             # clears it
+])
+def test_emergency_contact_is_normalised(client, outbox, given, stored):
+    h = {"Authorization": f"Bearer {_login(client, outbox)['session']}"}
+    r = client.patch("/api/me", headers=h, json={"emergency_contact": given})
+    assert r.status_code == 200 and r.json()["emergency_contact"] == stored
+
+
+@pytest.mark.parametrize("bad", ["12345", "call my mum", "+0 123456789", "5876543210", "javascript:alert(1)"])
+def test_emergency_contact_must_be_a_phone_number(client, outbox, bad):
+    h = {"Authorization": f"Bearer {_login(client, outbox)['session']}"}
+    assert client.patch("/api/me", headers=h, json={"emergency_contact": bad}).status_code == 422

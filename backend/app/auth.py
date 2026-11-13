@@ -2,6 +2,7 @@
 import hashlib
 import logging
 import os
+import re
 import secrets
 from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
@@ -117,7 +118,22 @@ class MeUpdate(BaseModel):  # dob and email are deliberately not editable (age g
         return v
 
     gender: str | None = Field(default=None, max_length=30)
-    emergency_contact: str | None = Field(default=None, max_length=120)
+    emergency_contact: str | None = Field(default=None, max_length=30)
+
+    @field_validator("emergency_contact")
+    @classmethod
+    def phone_number(cls, v: str | None) -> str | None:
+        """Stored as +<country><number> so the app can build tel: and WhatsApp links for SOS (task 10)."""
+        if not v:
+            return None  # empty clears it
+        digits = re.sub(r"[\s\-()]", "", v)
+        if re.fullmatch(r"[6-9]\d{9}", digits):  # Indian mobile without the country code
+            digits = "+91" + digits
+        elif re.fullmatch(r"0[6-9]\d{9}", digits):
+            digits = "+91" + digits[1:]
+        if not re.fullmatch(r"\+[1-9]\d{7,14}", digits):
+            raise ValueError("Enter a phone number, e.g. +91 98765 43210")
+        return digits
 
 
 # ---- dependency ----

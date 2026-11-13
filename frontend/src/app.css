@@ -67,3 +67,7 @@ a.cta { display: block; text-align: center; text-decoration: none; box-sizing: b
 .member form { display: grid; gap: 8px; margin-top: 8px; }
 textarea { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #2a3150; background: #0f1324;
   color: var(--text); font: inherit; }
+.safety-card { margin-top: 16px; }
+.safety-card h2 { margin: 0; }
+.cta.sos { background: #ff3b5c; color: #fff; }
+.sos-panel, .contact { display: grid; gap: 8px; }
