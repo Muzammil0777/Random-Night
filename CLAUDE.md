@@ -21,7 +21,7 @@ Hyderabad-first app that builds a curated night out (area, budget, time, vibe + 
 ```bash
 py -3.12 -m venv .venv && .venv/Scripts/python -m pip install -r requirements.txt
 TEST_DATABASE_URL= .venv/Scripts/python -m pytest -q   # fast loop: in-memory SQLite
-.venv/Scripts/python -m pytest -q                      # real Postgres: Neon "test" branch (~8 min, before commits). NEVER run two at once: each test drops all tables
+.venv/Scripts/python -m pytest -q                      # real Postgres: Neon "test" branch (~8 min for ~200 tests; schema rebuilt once per run, tables truncated per test; before commits). NEVER run two at once: each run wipes the branch
 .venv/Scripts/python -m app.seed                       # seeds the branch in DATABASE_URL (Neon production)
 .venv/Scripts/python -m uvicorn app.main:app --reload
 .venv/Scripts/python -m app.staff "Venue name" "Front door"  # door-staff key for /venue, shown once; revoke in /admin
