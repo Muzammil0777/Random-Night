@@ -214,6 +214,21 @@ class CheckIn(Base):
     entered_by: Mapped[str]
 
 
+class VenueVisit(Base):
+    """The billable unit (task 8): one checked-in guest at one venue on one night, however many stops there.
+    Written at the first check-in, with the venue's rate copied so later rate changes never rewrite invoices."""
+    __tablename__ = "venue_visits"
+    __table_args__ = (UniqueConstraint("venue_id", "user_id", "night_date"),
+                      CheckConstraint("rate_inr >= 0", name="rate_non_negative"))
+    id: Mapped[int] = mapped_column(primary_key=True)
+    venue_id: Mapped[int] = fk("venues.id")
+    venue: Mapped[Venue] = relationship()
+    user_id: Mapped[int] = fk("users.id")
+    night_date: Mapped[date] = mapped_column(index=True)
+    rate_inr: Mapped[int]
+    checkin_id: Mapped[int] = fk("checkins.id")  # the first check-in, for disputes
+
+
 class Rating(Base):
     __tablename__ = "ratings"
     __table_args__ = (

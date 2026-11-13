@@ -15,11 +15,11 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.auth import _aware, _hash, now
+from app.auth import _aware, _hash, first_name, now
 from app.auth import IST
 from app.bookings import tonight
 from app.db import SessionLocal
-from app.models import CheckIn, Experience, PlanStop, Ticket, User, Venue, VenueKey
+from app.models import CheckIn, Experience, PlanStop, Ticket, User, Venue, VenueKey, VenueVisit
 from app.nights import DbDep
 
 router = APIRouter(prefix="/api/staff", tags=["staff"])
@@ -96,15 +96,28 @@ def check_in(body: CodeIn, key: StaffDep, db: DbDep) -> CheckedIn:
     if not opens <= now() <= closes:  # billing counts check-ins, so the guest must be here around the stop's time
         raise HTTPException(status.HTTP_409_CONFLICT, "This code is for another time tonight: "
                             f"{stop.experience.title}, {_aware(stop.starts_at).astimezone(IST):%I:%M %p}.")
-    db.add(CheckIn(plan_stop_id=ticket.plan_stop_id, user_id=ticket.user_id, venue_id=key.venue_id,
-                   entered_by=key.label))
+    checkin = CheckIn(plan_stop_id=ticket.plan_stop_id, user_id=ticket.user_id, venue_id=key.venue_id,
+                      entered_by=key.label)
+    db.add(checkin)
     try:
-        db.commit()
+        db.flush()
     except IntegrityError:  # unique (plan_stop_id, user_id): a code works once
         db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "Already checked in.")
+    # Billing: the first check-in of this guest here tonight creates the visit, at today's rate.
+    # shortcut: two stops of one guest checked in at the same instant could race on the visit's unique key (one 409s).
+    if not db.scalar(select(VenueVisit.id).where(VenueVisit.venue_id == key.venue_id,
+                                                 VenueVisit.user_id == ticket.user_id,
+                                                 VenueVisit.night_date == ticket.night_date)):
+        db.add(VenueVisit(venue_id=key.venue_id, user_id=ticket.user_id, night_date=ticket.night_date,
+                          rate_inr=key.venue.cpa_rate_inr, checkin_id=checkin.id))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "Already checked in.")
     name = db.get(User, ticket.user_id).name
-    return CheckedIn(guest=name.split()[0], stop=stop.experience.title)
+    return CheckedIn(guest=first_name(name), stop=stop.experience.title)
 
 
 def create_key(db: Session, venue_name: str, label: str) -> str:

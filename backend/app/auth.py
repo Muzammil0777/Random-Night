@@ -50,6 +50,11 @@ def age_on(dob: date, on: date) -> int:
     return on.year - dob.year - ((on.month, on.day) < (dob.month, dob.day))
 
 
+def first_name(name: str) -> str:
+    """What other guests and venue staff see of someone's name."""
+    return (name.split() or ["Guest"])[0]
+
+
 def can_enter_licensed(user: User, on: date) -> bool:
     """21+ on the night itself, and an admin has checked their ID (a typed DOB alone isn't proof)."""
     return user.id_verified and age_on(user.dob, on) >= LICENSED_MIN_AGE

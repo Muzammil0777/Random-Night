@@ -7,7 +7,7 @@ from sqladmin.authentication import AuthenticationBackend
 from starlette.requests import Request
 
 from app.db import engine
-from app.models import Experience, User, Venue, VenueKey
+from app.models import Experience, User, Venue, VenueKey, VenueVisit
 
 MIN_ADMIN_PASSWORD = 12
 
@@ -63,6 +63,17 @@ class VenueKeyAdmin(ModelView, model=VenueKey):
     can_delete = False
 
 
+class VenueVisitAdmin(ModelView, model=VenueVisit):
+    """Billable guests across all venues; filter by venue and export CSV here. Read-only: invoices come from these."""
+    name_plural = "Billable visits"
+    column_list = [VenueVisit.night_date, VenueVisit.venue, VenueVisit.user_id, VenueVisit.rate_inr,
+                   VenueVisit.checkin_id]
+    column_default_sort = [(VenueVisit.night_date, True)]
+    can_create = False
+    can_edit = False
+    can_delete = False
+
+
 admin: Admin | None = None
 
 
@@ -71,6 +82,6 @@ def mount_admin(app) -> Admin:
     # SECRET_KEY signs the admin session cookie. Without it a random key is used, so admin logins reset on restart.
     secret = os.environ.get("SECRET_KEY") or secrets.token_urlsafe(32)
     admin = Admin(app, engine, authentication_backend=PasswordAuth(secret_key=secret), title="Random Night admin")
-    for view in (VenueAdmin, ExperienceAdmin, UserAdmin, VenueKeyAdmin):
+    for view in (VenueAdmin, ExperienceAdmin, UserAdmin, VenueKeyAdmin, VenueVisitAdmin):
         admin.add_view(view)
     return admin

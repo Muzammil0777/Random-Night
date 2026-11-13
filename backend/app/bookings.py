@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, joinedload
 
-from app.auth import IST, UserDep, _aware, now
+from app.auth import IST, UserDep, _aware, first_name, now
 from app.generator import Stop
 from app.models import CheckIn, DropEntry, Experience, GroupMember, Night, Plan, PlanStop, Ticket, User
 from app.nights import DbDep, PlanInputs, StopOut, build_night, stop_out
@@ -75,7 +75,7 @@ def has_night(db: Session, user: User, night_date: date) -> bool:
 def first_names(db: Session, group_id: int) -> list[str]:
     names = db.scalars(select(User.name).join(GroupMember, GroupMember.user_id == User.id)
                        .where(GroupMember.group_id == group_id).order_by(User.id))
-    return [n.split()[0] for n in names]
+    return [first_name(n) for n in names]
 
 
 def booked_night(db: Session, plan: Plan, user: User) -> BookedNight:
