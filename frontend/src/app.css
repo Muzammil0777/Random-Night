@@ -8,7 +8,7 @@
 * { box-sizing: border-box; }
 body { margin: 0; }
 .shell { max-width: 480px; margin: 0 auto; padding: 16px 16px 40px; }
-.top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.top { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .brand { font-weight: 800; letter-spacing: 0.12em; color: var(--lime); }
 h1 { font-size: 1.6rem; line-height: 1.2; margin: 8px 0 16px; }
 .hero { font-size: 2rem; }
@@ -73,3 +73,9 @@ textarea { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #2
 .sos-panel, .contact { display: grid; gap: 8px; }
 .google { display: grid; justify-items: center; gap: 8px; min-height: 44px; margin-bottom: 8px; }
 .or { text-align: center; margin: 8px 0; }
+.how ol { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+.how h2, .waitlist h2 { margin: 0; }
+.waitlist form { display: grid; gap: 10px; }
+.waitlist .big { font-size: 1.3rem; margin: 0; }
+.waitlist .big strong { color: var(--lime); font-size: 1.8rem; }
+.ios-help { flex-basis: 100%; margin: 0; }

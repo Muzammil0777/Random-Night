@@ -274,3 +274,14 @@ class RateHit(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     key: Mapped[str]  # e.g. "auth-ip:1.2.3.4", "door:17"
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)  # prune() scans by age
+
+
+class WaitlistEntry(Base):
+    """Task 11b: launch list for the first Random Friday. Referrals move you up (ordering in app/waitlist.py)."""
+    __tablename__ = "waitlist"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(unique=True)
+    area: Mapped[str | None]
+    ref_code: Mapped[str] = mapped_column(unique=True)  # their share link: /?ref=<code>
+    referred_by_id: Mapped[int | None] = fk("waitlist.id", nullable=True)
+    created_at: Mapped[datetime] = created_at()

@@ -11,7 +11,7 @@ from wtforms.validators import NumberRange, Optional
 
 from app import ratelimit
 from app.db import SessionLocal, engine
-from app.models import Experience, Report, User, Venue, VenueKey, VenueVisit
+from app.models import Experience, Report, User, Venue, VenueKey, VenueVisit, WaitlistEntry
 
 MIN_ADMIN_PASSWORD = 12
 MAX_ADMIN_FAILS, ADMIN_FAIL_WINDOW = 5, timedelta(minutes=15)  # per IP
@@ -103,6 +103,16 @@ class ReportAdmin(ModelView, model=Report):
     can_delete = False
 
 
+class WaitlistAdmin(ModelView, model=WaitlistEntry):
+    """Launch list. Invite in the order the app shows people (most referrals first, then earliest); export CSV here."""
+    name_plural = "Waitlist"
+    column_list = [WaitlistEntry.id, WaitlistEntry.email, WaitlistEntry.area, WaitlistEntry.referred_by_id,
+                   WaitlistEntry.created_at]
+    column_searchable_list = [WaitlistEntry.email]
+    can_create = False
+    can_edit = False
+
+
 admin: Admin | None = None
 
 
@@ -113,6 +123,6 @@ def mount_admin(app) -> Admin:
     https = os.environ.get("APP_URL", "").startswith("https://")
     backend = PasswordAuth(secret_key=secret, https_only=https, same_site="strict")  # admin cookie never over http
     admin = Admin(app, engine, authentication_backend=backend, title="Random Night admin")
-    for view in (VenueAdmin, ExperienceAdmin, UserAdmin, VenueKeyAdmin, VenueVisitAdmin, ReportAdmin):
+    for view in (VenueAdmin, ExperienceAdmin, UserAdmin, VenueKeyAdmin, VenueVisitAdmin, ReportAdmin, WaitlistAdmin):
         admin.add_view(view)
     return admin

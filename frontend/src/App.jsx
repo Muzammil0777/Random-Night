@@ -72,13 +72,20 @@ export default function App() {
     <div className="shell">
       <header className="top">
         <span className="brand">RANDOM NIGHT</span>
+        <InstallButton />
         {me && (
           <button type="button" className="link" onClick={logout}>Log out</button>
         )}
       </header>
       <main>
         {me === undefined && <p className="muted" aria-live="polite">Loading…</p>}
-        {me === null && <Login initialError={bootError} onLoggedIn={setMe} />}
+        {me === null && (
+          <>
+            <Login initialError={bootError} onLoggedIn={setMe} />
+            <HowItWorks />
+            <Waitlist />
+          </>
+        )}
         {me && <Planner me={me} onMe={setMe} />}
       </main>
     </div>
@@ -637,5 +644,144 @@ function ContactForm({ onMe }) {
       {error && <p className="error" role="alert">{error}</p>}
       <button type="submit" className="cta">Save contact</button>
     </form>
+  );
+}
+
+// ---- landing (task 11b): how it works + launch waitlist with a referral bump ----
+const refFromLink = new URLSearchParams(window.location.search).get("ref"); // a friend's share link
+const WAITLIST_KEY = "rn_waitlist"; // your own share code: not a login, just so your place shows next visit
+
+function HowItWorks() {
+  return (
+    <section className="card how">
+      <h2>How it works</h2>
+      <ol>
+        <li><strong>Pick four things:</strong> area, budget, how long, and the vibe.</li>
+        <li><strong>Get a timed night:</strong> 2–4 stops that fit, with prices upfront. Free for you.</li>
+        <li><strong>Go solo, with friends, or meet new people:</strong> Random Friday puts you in a group of 4–6.</li>
+      </ol>
+      <p className="muted small">
+        Partner venues pay us when you check in, and they're always labelled. They only show up when they already
+        fit your picks. Bars and clubs need 21+ and an ID check.
+      </p>
+    </section>
+  );
+}
+
+function Waitlist() {
+  const [place, setPlace] = useState(null);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [areas, setAreas] = useState([]);
+
+  useEffect(() => {
+    let ignore = false;
+    api("/options").then((o) => !ignore && setAreas(o.areas)).catch(() => {});
+    const code = localStorage.getItem(WAITLIST_KEY);
+    if (code) api(`/waitlist/${encodeURIComponent(code)}`).then((p) => !ignore && setPlace(p)).catch(() => {});
+    return () => { ignore = true; };
+  }, []);
+
+  async function join(e) {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.currentTarget));
+    setBusy(true);
+    setError(null);
+    try {
+      const p = await api("/waitlist", { method: "POST", body: { email: f.email, area: f.area || null, ref: refFromLink } });
+      if (p.ref_code) localStorage.setItem(WAITLIST_KEY, p.ref_code);
+      setPlace(p);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const link = place?.ref_code && `${window.location.origin}/?ref=${place.ref_code}`;
+  const pitch = "Random Night: tell it your area, budget and vibe, get a curated night out in Hyderabad. Join me:";
+
+  async function copy() {
+    await navigator.clipboard.writeText(link).catch(() => {});
+    setCopied(true);
+  }
+
+  return (
+    <section className="card waitlist" aria-labelledby="wl-title">
+      <h2 id="wl-title">First Random Friday</h2>
+      {place ? (
+        <>
+          <p className="big">You're <strong>#{place.position}</strong> of {place.total}</p>
+          {link ? (
+            <>
+              <p>Every friend who joins with your link moves you up. {place.referrals > 0 && `${place.referrals} so far.`}</p>
+              <a className="cta" href={`https://wa.me/?text=${encodeURIComponent(`${pitch} ${link}`)}`}
+                 target="_blank" rel="noopener noreferrer">Share on WhatsApp</a>
+              <button type="button" className="cta ghost" onClick={copy}>{copied ? "Link copied" : "Copy my link"}</button>
+            </>
+          ) : (
+            <p className="muted small">You're already on the list. Use the link from the phone you joined on to share it.</p>
+          )}
+        </>
+      ) : (
+        <form onSubmit={join}>
+          <p>We're starting with one Friday night. Get on the list: invites go out by place in line.</p>
+          {refFromLink && <p className="note">A friend sent you: joining here moves them up.</p>}
+          <label htmlFor="wl-email">Email</label>
+          <input id="wl-email" name="email" type="email" autoComplete="email" required />
+          <label htmlFor="wl-area">Where you'd go out <span className="muted">(optional)</span></label>
+          <select id="wl-area" name="area" defaultValue="">
+            <option value="">Anywhere in Hyderabad</option>
+            {areas.map((a) => <option key={a}>{a}</option>)}
+          </select>
+          {error && <p className="error" role="alert">{error}</p>}
+          <button type="submit" className="cta" disabled={busy}>{busy ? "Joining…" : "Join the list"}</button>
+        </form>
+      )}
+    </section>
+  );
+}
+
+// ---- install the app (PWA) ----
+// Android/Chrome fires beforeinstallprompt (caught at load, before React mounts); iPhone needs Share -> Add to Home Screen.
+let deferredInstall = null;
+window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); deferredInstall = e; });
+const standalone = () => window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;
+const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
+
+function InstallButton() {
+  const [canInstall, setCanInstall] = useState(Boolean(deferredInstall));
+  const [iosHelp, setIosHelp] = useState(false);
+
+  useEffect(() => {
+    const ready = () => setCanInstall(true);
+    const done = () => setCanInstall(false);
+    window.addEventListener("beforeinstallprompt", ready);
+    window.addEventListener("appinstalled", done);
+    return () => { window.removeEventListener("beforeinstallprompt", ready); window.removeEventListener("appinstalled", done); };
+  }, []);
+
+  if (standalone()) return null;
+  if (canInstall) {
+    return (
+      <button type="button" className="link" onClick={async () => {
+        deferredInstall?.prompt();
+        await deferredInstall?.userChoice;
+        deferredInstall = null;
+        setCanInstall(false);
+      }}>Install app</button>
+    );
+  }
+  if (!isIos()) return null;
+  return (
+    <>
+      <button type="button" className="link" aria-expanded={iosHelp} onClick={() => setIosHelp(!iosHelp)}>Install app</button>
+      {iosHelp && (
+        <p className="note ios-help" role="note">
+          In Safari, tap <strong>Share</strong> (the square with an arrow), then <strong>Add to Home Screen</strong>.
+        </p>
+      )}
+    </>
   );
 }
