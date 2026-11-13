@@ -5,14 +5,19 @@ from dotenv import load_dotenv
 from sqlalchemy import MetaData, create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
-# Local dev reads backend/.env; on Vercel the env vars are set in the dashboard and this is a no-op.
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+# Local dev: `neon env pull` writes DATABASE_URL (pooled) + DATABASE_URL_UNPOOLED to the repo-root .env.local;
+# backend/.env holds TEST_DATABASE_URL. On Vercel the vars come from the dashboard and these are no-ops.
+_BACKEND = Path(__file__).resolve().parent.parent
+load_dotenv(_BACKEND.parent / ".env.local")
+load_dotenv(_BACKEND / ".env")
 
 
 def make_engine(url: str, **kwargs):
     # Neon hands out postgres:// or postgresql:// URLs; route them to the psycopg 3 driver.
     if url.startswith(("postgres://", "postgresql://")):
         url = "postgresql+psycopg://" + url.split("://", 1)[1]
+        # Neon's pooled URL goes through PgBouncer (transaction mode): skip server-side prepared statements.
+        kwargs.setdefault("connect_args", {"prepare_threshold": None})
     if url.startswith("sqlite"):
         kwargs.setdefault("connect_args", {"check_same_thread": False})
     engine = create_engine(url, pool_pre_ping=True, **kwargs)

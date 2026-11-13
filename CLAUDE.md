@@ -7,7 +7,8 @@ Hyderabad-first app that builds a curated night out (area, budget, time, vibe + 
 
 ## Stack
 - Backend: `backend/`, FastAPI (sync routes + sync SQLAlchemy 2.0), Python **3.12** (matches Vercel; don't use the system 3.15).
-- DB: Postgres on **Neon** in prod via `DATABASE_URL`. Local dev and tests default to SQLite, so **use only portable column types** (no PG arrays/enums; use `JSON`, `String`, `Integer`).
+- DB: Postgres on **Neon** (project `cold-unit-37714956`, Singapore). `neon env pull` writes `DATABASE_URL` (pooled, for the app) and `DATABASE_URL_UNPOOLED` (direct, for migrations) to the repo-root `.env.local`. `backend/.env` holds `TEST_DATABASE_URL` (Neon branch `test`, where tests drop all tables). Both files are gitignored. With no `.env.local` the app falls back to SQLite, so **use only portable column types** (no PG arrays/enums; use `JSON`, `String`, `Integer`).
+- Neon config: `neon.ts` (Postgres only; branch `test` exempt from auto-expiry). Apply with `neon deploy`.
 - Money is stored as whole rupees in `Integer` columns (`*_inr`), never floats.
 - Frontend (from task 5): Vite + React PWA in `frontend/`.
 - Hosting: Vercel (Hobby while building; **Pro before the first paid venue invoice**, because Hobby is non-commercial only) + Neon. Keep code host-agnostic: env vars only.
@@ -15,8 +16,9 @@ Hyderabad-first app that builds a curated night out (area, budget, time, vibe + 
 ## Commands (Git Bash, run from `backend/`)
 ```bash
 py -3.12 -m venv .venv && .venv/Scripts/python -m pip install -r requirements.txt
-.venv/Scripts/python -m pytest -q
-.venv/Scripts/python -m app.seed
+TEST_DATABASE_URL= .venv/Scripts/python -m pytest -q   # fast loop: in-memory SQLite
+.venv/Scripts/python -m pytest -q                      # real Postgres: Neon "test" branch (~2 min, before commits)
+.venv/Scripts/python -m app.seed                       # seeds the branch in DATABASE_URL (Neon production)
 .venv/Scripts/python -m uvicorn app.main:app --reload
 ```
 
