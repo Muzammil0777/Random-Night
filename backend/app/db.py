@@ -1,7 +1,12 @@
 import os
+from pathlib import Path
 
+from dotenv import load_dotenv
 from sqlalchemy import MetaData, create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
+
+# Local dev reads backend/.env; on Vercel the env vars are set in the dashboard and this is a no-op.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
 def make_engine(url: str, **kwargs):
