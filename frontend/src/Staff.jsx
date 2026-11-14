@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "./App.jsx";
 
 // Venue door page (/venue): staff log in once with the venue key, then type each guest's 6-digit code.
@@ -24,9 +24,10 @@ export default function Staff() {
         {me && <button type="button" className="link" onClick={logout}>Log out</button>}
       </header>
       <main>
-        {me === undefined && <p className="muted" aria-live="polite">Loading…</p>}
+        {me === undefined && <p className="muted" role="status">Loading…</p>}
         {me === null && <KeyLogin onIn={setMe} />}
         {me && <CheckIn me={me} onCheckedIn={() => setCheckins((n) => n + 1)} />}
+        {me && <Tonight refresh={checkins} />}
         {me && <Dashboard refresh={checkins} />}
       </main>
     </div>
@@ -65,6 +66,7 @@ function CheckIn({ me, onCheckedIn }) {
   const [code, setCode] = useState("");
   const [result, setResult] = useState(null); // { ok, text }
   const [busy, setBusy] = useState(false);
+  const input = useRef(null);
 
   async function submit(e) {
     e.preventDefault();
@@ -78,6 +80,7 @@ function CheckIn({ me, onCheckedIn }) {
       setResult({ ok: false, text: err.message });
     } finally {
       setBusy(false);
+      input.current?.focus(); // ready for the next guest
     }
   }
 
@@ -86,13 +89,42 @@ function CheckIn({ me, onCheckedIn }) {
       <h1>{me.venue}</h1>
       <p className="muted small">{me.label}</p>
       <label htmlFor="code">Guest's 6-digit code</label>
-      <input id="code" className="code-input" inputMode="numeric" autoComplete="off" pattern="\d{6}" maxLength={6}
-             value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} required />
+      <input id="code" ref={input} className="code-input" inputMode="numeric" autoComplete="off" pattern="\d{6}"
+             maxLength={6} autoFocus placeholder="000000" value={code}
+             onChange={(e) => { setCode(e.target.value.replace(/\D/g, "")); setResult(null); }} required />
       <button type="submit" className="cta" disabled={busy || code.length !== 6}>{busy ? "Checking…" : "Check in"}</button>
       {result && (
-        <p className={result.ok ? "ok" : "error"} role={result.ok ? "status" : "alert"}>{result.text}</p>
+        <p className={result.ok ? "banner ok" : "banner err"} role={result.ok ? "status" : "alert"}>
+          {result.ok ? "✓ " : "✕ "}{result.text}
+        </p>
       )}
     </form>
+  );
+}
+
+const timeIST = (iso) => new Date(iso).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });
+
+// Tonight's check-ins at this venue, newest first: staff can see who's already in.
+function Tonight({ refresh }) {
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    let ignore = false;
+    api("/staff/tonight").then((r) => !ignore && setRows(r)).catch(() => !ignore && setRows([]));
+    return () => { ignore = true; };
+  }, [refresh]);
+  if (!rows) return null;
+  return (
+    <section className="card" aria-labelledby="tonight-title">
+      <h2 id="tonight-title">Tonight's check-ins ({rows.length})</h2>
+      {rows.length === 0 ? <p className="muted small">Nobody yet tonight.</p> : (
+        <ul className="tonight">
+          {rows.map((r) => (
+            <li key={`${r.at}-${r.guest}-${r.stop}`}><span><strong>{r.guest}</strong> · {r.stop}</span>
+              <time className="muted" dateTime={r.at}>{timeIST(r.at)}</time></li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

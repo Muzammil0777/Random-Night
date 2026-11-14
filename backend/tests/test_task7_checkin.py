@@ -246,3 +246,22 @@ def test_night_rolls_over_at_6am_ist(monkeypatch):
     assert bookings.tonight() == fri  # 1 AM Saturday is still Friday's night
     monkeypatch.setattr(bookings, "now", lambda: datetime.combine(fri + timedelta(days=1), time(6, 0), auth.IST))
     assert bookings.tonight() == fri + timedelta(days=1)
+
+
+def test_door_phone_lists_tonights_check_ins_here_only(client, seeded, on_night):
+    _, night = _book(client, seeded, name="Ravi Kumar")
+    venue = night["stops"][0]["venue"]
+    _staff(client, seeded, venue)
+    assert client.get("/api/staff/tonight").json() == []
+    client.post("/api/staff/checkin", json={"code": night["stops"][0]["code"]})
+    rows = client.get("/api/staff/tonight").json()
+    assert [(r["guest"], r["stop"]) for r in rows] == [("Ravi", night["stops"][0]["title"])]  # first name only
+    _staff(client, seeded, "Sample Biryani House")  # another venue sees none of it
+    assert client.get("/api/staff/tonight").json() == []
+    on_night(D + timedelta(days=1))
+    _staff(client, seeded, venue)
+    assert client.get("/api/staff/tonight").json() == []  # yesterday's check-ins drop off
+
+
+def test_tonight_list_needs_staff_login(client, seeded):
+    assert client.get("/api/staff/tonight").status_code == 401

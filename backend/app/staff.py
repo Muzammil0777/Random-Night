@@ -6,7 +6,7 @@ Turn a key off in /admin (Venue keys -> untick active).
 import os
 import secrets
 import sys
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -125,6 +125,25 @@ def check_in(body: CodeIn, key: StaffDep, db: DbDep) -> CheckedIn:
         raise HTTPException(status.HTTP_409_CONFLICT, "Already checked in.")
     name = db.get(User, ticket.user_id).name
     return CheckedIn(guest=first_name(name), stop=stop.experience.title)
+
+
+class TonightCheckIn(BaseModel):
+    guest: str  # first name only
+    stop: str
+    at: datetime
+
+
+@router.get("/tonight")
+def tonight_checkins(key: StaffDep, db: DbDep) -> list[TonightCheckIn]:
+    """Task 14: the door phone's list of tonight's check-ins at this venue, newest first."""
+    rows = db.execute(
+        select(CheckIn.at, User.name, Experience.title)
+        .join(User, User.id == CheckIn.user_id)
+        .join(PlanStop, PlanStop.id == CheckIn.plan_stop_id).join(Experience, Experience.id == PlanStop.experience_id)
+        .join(Ticket, (Ticket.plan_stop_id == CheckIn.plan_stop_id) & (Ticket.user_id == CheckIn.user_id))
+        .where(CheckIn.venue_id == key.venue_id, Ticket.night_date == tonight())
+        .order_by(CheckIn.at.desc(), CheckIn.id.desc()).limit(50))
+    return [TonightCheckIn(guest=first_name(name), stop=title, at=_aware(at)) for at, name, title in rows]
 
 
 def create_key(db: Session, venue_name: str, label: str) -> str:

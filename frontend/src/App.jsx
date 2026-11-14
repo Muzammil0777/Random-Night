@@ -34,6 +34,13 @@ const fmtDay = (ymd) => new Date(`${ymd}T12:00:00+05:30`).toLocaleDateString("en
 const rupees = (n) => `₹${n.toLocaleString("en-IN")}`;
 const budgetLabel = (n, max) => (n === max ? `₹${n / 1000}K+` : `₹${n / 1000}K`);
 const hoursLabel = (h) => (h === null ? "All night" : `${h} hrs`);
+const ICONS = { party: "🎉", food: "🍜", chill: "🌙", surprise: "🎲", solo: "🙋", friends: "👯", new_people: "🤝" };
+const KINDS = { // what to expect at each kind of stop
+  meet: ["👋", "Meet up and ease into the night"], music: ["🎶", "Live music: find a good spot"],
+  challenge: ["🎯", "A game or challenge, just for fun"], food: ["🍽️", "Food stop: eat well"],
+  finale: ["✨", "The finale: end on a high"],
+};
+const firstName = (name) => (name.split(" ")[0] || name);
 const LABELS = { solo: "Just me", friends: "With friends", new_people: "Meet new people",
                  party: "Party", food: "Food", chill: "Chill", surprise: "Surprise me" };
 
@@ -53,6 +60,7 @@ export default function App() {
   const [bootError, setBootError] = useState(null);
   const [welcome, setWelcome] = useState(false);
   const [installHelp, setInstallHelp] = useState(false);
+  const [view, setView] = useState("plan"); // "plan" | "me"
 
   useEffect(() => {
     if (me && !localStorage.getItem(WELCOMED_KEY)) setWelcome(true); // first sign-in on this phone
@@ -78,6 +86,7 @@ export default function App() {
   async function logout() {
     await api("/auth/logout", { method: "POST" }).catch(() => {});
     setMe(null);
+    setView("plan");
   }
 
   return (
@@ -86,8 +95,15 @@ export default function App() {
         <span className="brand">RANDOM NIGHT</span>
         <span className="top-links">
           <InstallButton onHelp={() => setInstallHelp(true)} />
-          {me && <button type="button" className="link" onClick={() => setWelcome(true)}>Help</button>}
-          {me && <button type="button" className="link" onClick={logout}>Log out</button>}
+          {me && (
+            <nav className="nav" aria-label="Main">
+              {[["plan", "Plan"], ["me", "Me"]].map(([id, label]) => (
+                <button key={id} type="button" className="navlink" aria-current={view === id ? "page" : undefined}
+                        onClick={() => setView(id)}>{label}</button>
+              ))}
+              <button type="button" className="navlink" onClick={() => setWelcome(true)}>Help</button>
+            </nav>
+          )}
         </span>
       </header>
       {welcome && <Welcome onDone={closeWelcome} />}
@@ -101,7 +117,7 @@ export default function App() {
         </div>
       )}
       <main>
-        {me === undefined && <p className="muted" aria-live="polite">Loading…</p>}
+        {me === undefined && <Skeleton lines={4} />}
         {me === null && (
           <>
             <Login initialError={bootError} onLoggedIn={setMe} />
@@ -114,7 +130,8 @@ export default function App() {
             </section>
           </>
         )}
-        {me && <Planner me={me} onMe={setMe} />}
+        {me && view === "me" && <Me me={me} onMe={setMe} onLogout={logout} />}
+        {me && view === "plan" && <Planner me={me} onMe={setMe} />}
       </main>
     </div>
   );
@@ -246,10 +263,30 @@ function Login({ initialError, onLoggedIn }) {
 }
 
 // ---- planner ----
-function Choice({ legend, name, options, value, onChange, label = (o) => LABELS[o] ?? String(o) }) {
+function Skeleton({ lines = 3 }) {
+  return (
+    <div className="skeleton" role="status" aria-label="Loading">
+      {Array.from({ length: lines }, (_, i) => <span key={i} />)}
+    </div>
+  );
+}
+
+function Step({ n, title, hint, children }) {
+  return (
+    <fieldset className="step">
+      <legend><span className="num" aria-hidden="true">{n}</span>{title}</legend>
+      {hint && <p className="hint">{hint}</p>}
+      {children}
+    </fieldset>
+  );
+}
+
+const choiceLabel = (o) => `${ICONS[o] ? `${ICONS[o]} ` : ""}${LABELS[o] ?? o}`;
+
+function Choice({ legend, name, options, value, onChange, label = choiceLabel }) {
   return (
     <fieldset className="choice">
-      <legend>{legend}</legend>
+      <legend className="sr-only">{legend}</legend>
       <div className="chips">
         {options.map((o) => (
           <label key={String(o)} className="chip">
@@ -300,6 +337,7 @@ function Planner({ me, onMe }) {
   }
 
   async function cancel() {
+    if (!window.confirm("Cancel this night? Its check-in codes stop working.")) return;
     setError(null);
     try {
       await api(`/plans/${booked.id}`, { method: "DELETE" });
@@ -337,6 +375,7 @@ function Planner({ me, onMe }) {
   }
 
   async function leaveDrop() {
+    if (!window.confirm("Leave this Random Friday? You can join again until 11 PM Thursday.")) return;
     try {
       await api(`/drops/${drop.date}`, { method: "DELETE" });
       setDrop(null);
@@ -370,30 +409,38 @@ function Planner({ me, onMe }) {
       </Night>
     );
   }
-  if (!opts) return error ? <p className="error" role="alert">{error}</p> : <p className="muted">Loading…</p>;
+  if (!opts) return error ? <p className="error" role="alert">{error}</p> : <Skeleton lines={6} />;
 
   const today = isoDate(new Date());
   const lastDay = isoDate(new Date(Date.now() + 30 * 864e5));
   return (
     <>
     {last && <LastNight night={last} />}
-    <form onSubmit={generate}>
-      <h1>Hey {me.name}, what's the plan?</h1>
-      <div className="card">
-        <label htmlFor="date">When</label>
+    <form onSubmit={generate} className="planner">
+      <h1>Hey {firstName(me.name)}, what's the plan?</h1>
+      <Step n={1} title="When & where" hint="Nights start at 9 PM.">
+        <label htmlFor="date">Date</label>
         <input id="date" type="date" min={today} max={lastDay} value={inputs.date}
                onChange={(e) => set("date")(e.target.value)} required />
-        <label htmlFor="area">Where in Hyderabad</label>
+        <label htmlFor="area">Area in Hyderabad</label>
         <select id="area" value={inputs.area} onChange={(e) => set("area")(e.target.value)}>
           {opts.areas.map((a) => <option key={a}>{a}</option>)}
         </select>
+      </Step>
+      <Step n={2} title="Budget per person" hint="Roughly what you'd spend in total, paid at the venues.">
         <Choice legend="Budget per person" name="budget" options={opts.budgets} value={inputs.budget_inr}
                 onChange={set("budget_inr")} label={(b) => budgetLabel(b, opts.budgets.at(-1))} />
-        {!joining && (
+      </Step>
+      {!joining && (
+        <Step n={3} title="How long" hint="Every stop fits inside this window.">
           <Choice legend="How long" name="hours" options={opts.hours} value={inputs.hours}
                   onChange={set("hours")} label={hoursLabel} />
-        )}
+        </Step>
+      )}
+      <Step n={joining ? 3 : 4} title="Vibe" hint="Surprise me mixes it up.">
         <Choice legend="Vibe" name="vibe" options={opts.vibes} value={inputs.vibe} onChange={set("vibe")} />
+      </Step>
+      <Step n={joining ? 4 : 5} title="Who's coming" hint="Meet new people joins this week's Random Friday.">
         <Choice legend="Who's coming" name="company" options={opts.company} value={inputs.company}
                 onChange={(c) => {
                   set("company")(c);
@@ -405,7 +452,7 @@ function Planner({ me, onMe }) {
             <span>I'm a woman and want a women-only group</span>
           </label>
         )}
-      </div>
+      </Step>
       {joining && (
         <p className="note">
           Random Friday: join by 11 PM Thursday and we match you into a group of 4–6 who picked the same area, vibe and
@@ -418,8 +465,16 @@ function Planner({ me, onMe }) {
       {inputs.company === "friends" && (
         <p className="note">Bringing friends to a bar? Everyone needs a valid ID showing they're 21+.</p>
       )}
-      {error && <p className="error" role="alert">{error}</p>}
-      <button type="submit" className="cta" disabled={busy}>{busy ? "One moment…" : joining ? "Join Random Friday →" : "Generate my night →"}</button>
+      <div className="sticky-cta">
+        <p className="summary">
+          {[fmtDay(inputs.date), inputs.area, budgetLabel(inputs.budget_inr, opts.budgets.at(-1)),
+            joining ? "9 PM–1 AM" : hoursLabel(inputs.hours), LABELS[inputs.vibe]].join(" · ")}
+        </p>
+        {error && <p className="error" role="alert">{error}</p>}
+        <button type="submit" className="cta" disabled={busy}>
+          {busy ? "One moment…" : joining ? "Join Random Friday →" : "Generate my night →"}
+        </button>
+      </div>
     </form>
     </>
   );
@@ -467,20 +522,24 @@ function Night({ night, inputs, maxBudget, title = "Your night, curated.", child
           <li key={`${s.starts_at}-${s.title}`}>
             <time dateTime={s.starts_at}>{fmtTime(s.starts_at)}</time>
             <div>
-              <h2>{s.title}</h2>
+              <h2><span aria-hidden="true">{KINDS[s.kind]?.[0]} </span>{s.title}</h2>
+              <p className="kind">{KINDS[s.kind]?.[1]}</p>
               <p className="muted">{s.venue} · {s.area} · {rupees(s.price_per_head_inr)}</p>
               {s.is_partner && <span className="badge">Partner venue</span>}
-              {s.code && (
-                <p className="code">
-                  {s.checked_in ? "Checked in ✓" : <>Show staff this code: <strong>{s.code.slice(0, 3)} {s.code.slice(3)}</strong></>}
-                </p>
-              )}
+              {s.code && (s.checked_in
+                ? <p className="ok">Checked in ✓</p>
+                : (
+                  <div className="ticket">
+                    <span className="muted small">Show staff this code</span>
+                    <strong aria-label={`Code ${s.code.split("").join(" ")}`}>{s.code.slice(0, 3)} {s.code.slice(3)}</strong>
+                  </div>
+                ))}
               {s.checked_in && <Stars stopId={s.plan_stop_id} title={s.title} initial={s.my_stars} />}
             </div>
           </li>
         ))}
       </ol>
-      <p className="total">About {rupees(night.total_inr)} per person, paid at the venues. Random Night is free.</p>
+      <p className="total"><span>About {rupees(night.total_inr)}</span> per person, paid at the venues. Random Night is free.</p>
       {anyPartner && (
         <p className="note">
           Partner venues pay Random Night when you check in. They only appear when they already fit your
@@ -767,6 +826,60 @@ function Waitlist() {
           <button type="submit" className="cta" disabled={busy}>{busy ? "Joining…" : "Join the list"}</button>
         </form>
       )}
+    </section>
+  );
+}
+
+// ---- me (task 14): profile, emergency contact, log out ----
+function Me({ me, onMe, onLogout }) {
+  const [name, setName] = useState(me.name);
+  const [contact, setContact] = useState(me.emergency_contact ?? "");
+  const [msg, setMsg] = useState(null);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  async function save(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    setMsg(null);
+    try {
+      const updated = await api("/me", { method: "PATCH", body: { name, emergency_contact: contact } });
+      onMe(updated);
+      setContact(updated.emergency_contact ?? "");
+      setMsg("Saved.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const dob = new Date(`${me.dob}T12:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  return (
+    <section>
+      <h1>Me</h1>
+      <form className="card" onSubmit={save}>
+        <label htmlFor="me-name">Name</label>
+        <input id="me-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} required
+               autoComplete="name" />
+        <label htmlFor="me-contact">Emergency contact's phone</label>
+        <input id="me-contact" type="tel" inputMode="tel" value={contact} onChange={(e) => setContact(e.target.value)}
+               placeholder="+91 98765 43210" autoComplete="off" />
+        <p className="hint">Used by Share plan and SOS on your nights. Leave it empty to remove it.</p>
+        {error && <p className="error" role="alert">{error}</p>}
+        {msg && <p className="ok" role="status">{msg}</p>}
+        <button type="submit" className="cta" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+      </form>
+      <dl className="card facts">
+        <div><dt>Email</dt><dd>{me.email}</dd></div>
+        <div><dt>Date of birth</dt><dd>{dob}</dd></div>
+        <div>
+          <dt>ID check</dt>
+          <dd>{me.id_verified ? <span className="ok">Checked ✓</span> : "Not yet: staff check your ID at your first bar night"}</dd>
+        </div>
+      </dl>
+      <button type="button" className="cta ghost" onClick={onLogout}>Log out</button>
     </section>
   );
 }
