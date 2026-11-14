@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { InstallButton, InstallGuide, WELCOMED_KEY, Welcome } from "./Welcome.jsx";
 
 // ---- api ----
 export async function api(path, { method = "GET", body } = {}) {
@@ -50,6 +51,17 @@ function nextFriday(strict = false) {
 export default function App() {
   const [me, setMe] = useState(undefined); // undefined = loading, null = logged out
   const [bootError, setBootError] = useState(null);
+  const [welcome, setWelcome] = useState(false);
+  const [installHelp, setInstallHelp] = useState(false);
+
+  useEffect(() => {
+    if (me && !localStorage.getItem(WELCOMED_KEY)) setWelcome(true); // first sign-in on this phone
+  }, [me]);
+
+  function closeWelcome() {
+    localStorage.setItem(WELCOMED_KEY, "1");
+    setWelcome(false);
+  }
 
   useEffect(() => {
     let ignore = false;
@@ -72,11 +84,22 @@ export default function App() {
     <div className="shell">
       <header className="top">
         <span className="brand">RANDOM NIGHT</span>
-        <InstallButton />
-        {me && (
-          <button type="button" className="link" onClick={logout}>Log out</button>
-        )}
+        <span className="top-links">
+          <InstallButton onHelp={() => setInstallHelp(true)} />
+          {me && <button type="button" className="link" onClick={() => setWelcome(true)}>Help</button>}
+          {me && <button type="button" className="link" onClick={logout}>Log out</button>}
+        </span>
       </header>
+      {welcome && <Welcome onDone={closeWelcome} />}
+      {installHelp && (
+        <div className="welcome" role="dialog" aria-modal="true" aria-labelledby="install-title">
+          <div className="welcome-card">
+            <h1 id="install-title">Install the app</h1>
+            <InstallGuide />
+            <button type="button" className="cta ghost" onClick={() => setInstallHelp(false)}>Close</button>
+          </div>
+        </div>
+      )}
       <main>
         {me === undefined && <p className="muted" aria-live="polite">Loading…</p>}
         {me === null && (
@@ -84,6 +107,11 @@ export default function App() {
             <Login initialError={bootError} onLoggedIn={setMe} />
             <HowItWorks />
             <Waitlist />
+            <section className="card" aria-labelledby="get-app">
+              <h2 id="get-app">Get the app</h2>
+              <p className="muted small">No app store needed: add Random Night to your home screen in a few taps.</p>
+              <InstallGuide />
+            </section>
           </>
         )}
         {me && <Planner me={me} onMe={setMe} />}
@@ -740,48 +768,5 @@ function Waitlist() {
         </form>
       )}
     </section>
-  );
-}
-
-// ---- install the app (PWA) ----
-// Android/Chrome fires beforeinstallprompt (caught at load, before React mounts); iPhone needs Share -> Add to Home Screen.
-let deferredInstall = null;
-window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); deferredInstall = e; });
-const standalone = () => window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;
-const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
-
-function InstallButton() {
-  const [canInstall, setCanInstall] = useState(Boolean(deferredInstall));
-  const [iosHelp, setIosHelp] = useState(false);
-
-  useEffect(() => {
-    const ready = () => setCanInstall(true);
-    const done = () => setCanInstall(false);
-    window.addEventListener("beforeinstallprompt", ready);
-    window.addEventListener("appinstalled", done);
-    return () => { window.removeEventListener("beforeinstallprompt", ready); window.removeEventListener("appinstalled", done); };
-  }, []);
-
-  if (standalone()) return null;
-  if (canInstall) {
-    return (
-      <button type="button" className="link" onClick={async () => {
-        deferredInstall?.prompt();
-        await deferredInstall?.userChoice;
-        deferredInstall = null;
-        setCanInstall(false);
-      }}>Install app</button>
-    );
-  }
-  if (!isIos()) return null;
-  return (
-    <>
-      <button type="button" className="link" aria-expanded={iosHelp} onClick={() => setIosHelp(!iosHelp)}>Install app</button>
-      {iosHelp && (
-        <p className="note ios-help" role="note">
-          In Safari, tap <strong>Share</strong> (the square with an arrow), then <strong>Add to Home Screen</strong>.
-        </p>
-      )}
-    </>
   );
 }
