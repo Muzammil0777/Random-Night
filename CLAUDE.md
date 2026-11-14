@@ -2,7 +2,7 @@
 
 Hyderabad-first app that builds a curated night out (area, budget, time, vibe + company mode) and matches solo users into groups of 4–6. It's free for users; venues pay per checked-in guest.
 
-- Repo: https://github.com/Muzammil0777/Random-Night (git remote `origin`, branch `main`). Push only when asked.
+- Repo: https://github.com/Muzammil0777/Random-Night (git remote `origin`, branch `main`). Push only when asked: **every push to `main` deploys to production** (Vercel project `random-night`, live at https://random-night-lemon.vercel.app). Run `alembic upgrade head` on Neon production before pushing code that needs a new migration.
 - Plan: `tasks/plan.md` (one task = one commit, in table order)
 - Research: `research/marketing-research.md`
 
