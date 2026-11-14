@@ -2,14 +2,17 @@
 import os
 import secrets
 from datetime import timedelta
+from pathlib import Path
 
-from sqladmin import Admin, ModelView
+from sqladmin import Admin, ModelView, action
 from sqladmin.authentication import AuthenticationBackend
 from starlette.requests import Request
+from starlette.responses import PlainTextResponse
 from wtforms import FloatField
 from wtforms.validators import NumberRange, Optional
 
-from app import ratelimit
+from app import ratelimit, staff
+from app.auth import today_ist
 from app.db import SessionLocal, engine
 from app.models import Experience, Report, User, Venue, VenueKey, VenueVisit, WaitlistEntry
 
@@ -59,6 +62,24 @@ class VenueAdmin(ModelView, model=Venue):
     form_args = {"rating_avg": {"validators": [Optional(), NumberRange(min=0, max=5)]}}
     can_delete = False  # check-ins and invoices point at venues: untick "active" instead
 
+    @action(name="create-door-key", label="Create door key",
+            confirmation_message="Create a new door key for this venue? It is shown only once.")
+    async def create_door_key(self, request: Request):
+        """Task 12: same as `python -m app.staff`, from the admin. The key page is never cached."""
+        pks = [p for p in request.query_params.get("pks", "").split(",") if p]
+        if len(pks) != 1 or not pks[0].isdigit():
+            return PlainTextResponse("Tick exactly one venue, then choose Actions > Create door key.", status_code=400)
+        with self.session_maker() as db:
+            venue = db.get(Venue, int(pks[0]))
+            if venue is None:
+                return PlainTextResponse("No such venue.", status_code=404)
+            label = f"Door key {today_ist():%d %b}"
+            key, name = staff.create_key(db, venue.name, label), venue.name
+        response = await self.templates.TemplateResponse(request, "door_key.html", {
+            "venue": name, "label": label, "key": key, "site": os.environ.get("APP_URL", "")})
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
 
 class ExperienceAdmin(ModelView, model=Experience):
     column_list = [Experience.id, Experience.title, Experience.venue, Experience.kind, Experience.vibes,
@@ -78,7 +99,7 @@ class UserAdmin(ModelView, model=User):
 class VenueKeyAdmin(ModelView, model=VenueKey):
     name_plural = "Venue keys"
     column_list = [VenueKey.id, VenueKey.venue, VenueKey.label, VenueKey.active, VenueKey.created_at]
-    form_columns = [VenueKey.active]  # keys are created with `python -m app.staff` (shown once); here you only revoke
+    form_columns = [VenueKey.label, VenueKey.active]  # create keys from Venues > Actions; here rename or turn off
     can_create = False
     can_delete = False
 
@@ -122,7 +143,8 @@ def mount_admin(app) -> Admin:
     secret = os.environ.get("SECRET_KEY") or secrets.token_urlsafe(32)
     https = os.environ.get("APP_URL", "").startswith("https://")
     backend = PasswordAuth(secret_key=secret, https_only=https, same_site="strict")  # admin cookie never over http
-    admin = Admin(app, engine, authentication_backend=backend, title="Random Night admin")
+    admin = Admin(app, engine, authentication_backend=backend, title="Random Night admin",
+                  templates_dir=str(Path(__file__).parent / "templates"))  # always-dark base + door-key page
     for view in (VenueAdmin, ExperienceAdmin, UserAdmin, VenueKeyAdmin, VenueVisitAdmin, ReportAdmin, WaitlistAdmin):
         admin.add_view(view)
     return admin

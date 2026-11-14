@@ -1,0 +1,23 @@
+{% extends "sqladmin/layout.html" %}
+{# Task 12: shown once, right after "Create door key". Only the key's hash is stored. #}
+{% block content %}
+<div class="card">
+  <div class="card-header"><h3 class="card-title">Door key for {{ venue }}</h3></div>
+  <div class="card-body">
+    <p>Give this key to the venue's door staff. <strong>It is shown only once</strong>: if it's lost, create a new one
+      and turn this one off in <a href="{{ url_for('admin:list', identity='venue-key') }}">Venue keys</a>.</p>
+    <div class="input-group mb-3" style="max-width: 32rem">
+      <input id="door-key" class="form-control font-monospace" value="{{ key }}" readonly aria-label="Door key">
+      <button class="btn btn-primary" type="button"
+              onclick="navigator.clipboard.writeText(document.getElementById('door-key').value); this.textContent='Copied'">Copy</button>
+    </div>
+    <p class="text-secondary mb-1">Label: <strong>{{ label }}</strong> (rename it in Venue keys, e.g. "Front door"; check-ins show it).</p>
+    <ol class="text-secondary">
+      <li>On the door phone, open <strong>{{ site }}/venue</strong>.</li>
+      <li>Paste the key and tap <strong>Log in</strong>. The phone stays logged in for 30 days.</li>
+      <li>Type each guest's 6-digit code to check them in.</li>
+    </ol>
+    <a class="btn" href="{{ url_for('admin:list', identity='venue') }}">Back to venues</a>
+  </div>
+</div>
+{% endblock %}
